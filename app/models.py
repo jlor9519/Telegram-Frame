@@ -59,6 +59,7 @@ class DisplayConfig:
 @dataclass(slots=True)
 class InkyPiConfig:
     repo_path: Path
+    install_path: Path
     validated_commit: str
     waveshare_model: str
     plugin_id: str

@@ -13,6 +13,12 @@ The companion app in this repository handles:
 
 InkyPi remains the display backend. During setup, this project injects a custom InkyPi plugin into a cloned InkyPi checkout so that panel-specific image handling stays on the InkyPi side.
 
+By default, the setup expects the standard upstream InkyPi layout:
+
+- source checkout: `~/InkyPi`
+- runtime install path: `/usr/local/inkypi`
+- active source tree: `/usr/local/inkypi/src`, which resolves back to the checkout `src/` directory
+
 ## High-level flow
 
 1. A whitelisted user sends a photo to the Telegram bot.
@@ -65,4 +71,5 @@ That runner uses isolated state under `telegram-bot-test/`, disables Dropbox, mo
 
 - The default Waveshare model is set to `epd7in3e`, which matches the Waveshare 7.3 inch E6 documentation.
 - The default render size is `800x480`.
+- The default InkyPi source checkout path is `~/InkyPi`, and the default runtime install path is `/usr/local/inkypi`.
 - Exact InkyPi refresh behavior is intentionally configurable because the validated local command may differ between installations.

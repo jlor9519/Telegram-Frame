@@ -81,7 +81,7 @@ class InkyPiAdapter:
             payload_path=payload_path,
             image_path=image_path,
             repo_path=self.config.repo_path,
+            install_path=self.config.install_path,
             plugin_id=self.config.plugin_id,
         )
         return shlex.split(command)
-

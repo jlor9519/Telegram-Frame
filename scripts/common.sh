@@ -98,6 +98,30 @@ PY
 }
 
 
+resolve_inkypi_layout_values() {
+  local configured_repo_path="${1:-}"
+  local configured_install_path="${2:-}"
+  python3 - "${configured_repo_path}" "${configured_install_path}" <<'PY'
+import sys
+
+from app.inkypi_paths import resolve_inkypi_layout
+
+repo_arg = sys.argv[1] if len(sys.argv) > 1 else ""
+install_arg = sys.argv[2] if len(sys.argv) > 2 else ""
+layout = resolve_inkypi_layout(repo_arg or None, install_arg or None)
+
+print(layout.repo_path)
+print(layout.install_path)
+print(layout.source_root)
+print(layout.device_config_path)
+print(layout.git_sync_path or "")
+print(layout.source_origin)
+print("1" if layout.replaced_stale_repo_path else "0")
+print("1" if layout.install_src_exists else "0")
+PY
+}
+
+
 ensure_systemd_service_active() {
   local unit_name="$1"
   if [[ "${MOCK_INSTALL}" == "1" ]]; then

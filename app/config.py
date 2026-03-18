@@ -17,6 +17,7 @@ from app.models import (
     StorageConfig,
     TelegramConfig,
 )
+from app.inkypi_paths import DEFAULT_INSTALL_PATH
 
 
 class ConfigError(ValueError):
@@ -116,7 +117,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     if not refresh_command:
         errors.append("inkypi.refresh_command is required.")
     inkypi_config = InkyPiConfig(
-        repo_path=_resolve_path(inkypi_section.get("repo_path", "/opt/InkyPi")),
+        repo_path=_resolve_path(inkypi_section.get("repo_path", "~/InkyPi")),
+        install_path=_resolve_path(inkypi_section.get("install_path", str(DEFAULT_INSTALL_PATH))),
         validated_commit=str(inkypi_section.get("validated_commit", "main")),
         waveshare_model=str(inkypi_section.get("waveshare_model", "epd7in3e")),
         plugin_id=str(inkypi_section.get("plugin_id", "telegram_frame")),

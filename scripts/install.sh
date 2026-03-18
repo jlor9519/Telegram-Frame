@@ -23,12 +23,13 @@ fi
 whitelist_ids="$(normalize_id_list "${whitelist_ids}")"
 
 inkypi_repo="$(get_yaml_value inkypi.repo_path string)"
-if [[ -z "${inkypi_repo}" ]]; then
-  inkypi_repo="$(detect_inkypi_repo_from_service inkypi.service || true)"
-fi
-if [[ -z "${inkypi_repo}" ]]; then
-  inkypi_repo="/opt/InkyPi"
-fi
+inkypi_install_path="$(get_yaml_value inkypi.install_path string)"
+inkypi_layout=()
+while IFS= read -r line; do
+  inkypi_layout+=("${line}")
+done < <(resolve_inkypi_layout_values "${inkypi_repo}" "${inkypi_install_path}")
+inkypi_repo="${inkypi_layout[0]}"
+inkypi_install_path="${inkypi_layout[1]}"
 inkypi_commit="$(get_yaml_value inkypi.validated_commit string)"
 inkypi_commit="${inkypi_commit:-main}"
 waveshare_model="$(get_yaml_value inkypi.waveshare_model string)"
@@ -60,6 +61,7 @@ fi
 set_yaml_value security.admin_user_ids list-int "${admin_ids}"
 set_yaml_value security.whitelisted_user_ids list-int "${whitelist_ids}"
 set_yaml_value inkypi.repo_path string "${inkypi_repo}"
+set_yaml_value inkypi.install_path string "${inkypi_install_path}"
 set_yaml_value inkypi.validated_commit string "${inkypi_commit}"
 set_yaml_value inkypi.waveshare_model string "${waveshare_model}"
 set_yaml_value inkypi.refresh_command string "${refresh_command}"

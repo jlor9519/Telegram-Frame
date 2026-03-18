@@ -6,6 +6,7 @@ MOCK_STATE_DIR="${PROJECT_ROOT}/mock-installation"
 MOCK_CONFIG_FILE="${MOCK_STATE_DIR}/config.yaml"
 MOCK_ENV_FILE="${MOCK_STATE_DIR}/.env"
 MOCK_INKYPI_DIR="${MOCK_STATE_DIR}/InkyPi"
+MOCK_RUNTIME_DIR="${MOCK_STATE_DIR}/usr/local/inkypi"
 MOCK_DATA_DIR="${MOCK_STATE_DIR}/data"
 MOCK_LOG_DIR="${MOCK_STATE_DIR}/logs"
 
@@ -15,6 +16,7 @@ mkdir -p \
   "${MOCK_INKYPI_DIR}/src/config" \
   "${MOCK_INKYPI_DIR}/install" \
   "${MOCK_INKYPI_DIR}/.git" \
+  "${MOCK_RUNTIME_DIR}" \
   "${MOCK_DATA_DIR}/incoming" \
   "${MOCK_DATA_DIR}/rendered" \
   "${MOCK_DATA_DIR}/cache" \
@@ -23,6 +25,8 @@ mkdir -p \
   "${MOCK_DATA_DIR}/inkypi" \
   "${MOCK_LOG_DIR}"
 chmod 700 "${MOCK_STATE_DIR}" || true
+
+ln -snf "${MOCK_INKYPI_DIR}/src" "${MOCK_RUNTIME_DIR}/src"
 
 if [[ ! -f "${MOCK_INKYPI_DIR}/install/install.sh" ]]; then
   printf '#!/usr/bin/env bash\necho "Mock InkyPi install called with: $*"\n' > "${MOCK_INKYPI_DIR}/install/install.sh"
@@ -71,6 +75,7 @@ display:
 
 inkypi:
   repo_path: ${MOCK_INKYPI_DIR}
+  install_path: ${MOCK_RUNTIME_DIR}
   validated_commit: main
   waveshare_model: epd7in3e
   plugin_id: telegram_frame

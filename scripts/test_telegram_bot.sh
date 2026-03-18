@@ -7,6 +7,7 @@ TEST_CONFIG_FILE="${TEST_STATE_DIR}/config.yaml"
 TEST_ENV_FILE="${TEST_STATE_DIR}/.env"
 TEST_DATA_DIR="${TEST_STATE_DIR}/data"
 TEST_INKYPI_DIR="${TEST_STATE_DIR}/InkyPi"
+TEST_RUNTIME_DIR="${TEST_STATE_DIR}/usr/local/inkypi"
 TEST_VENV_DIR="${TEST_STATE_DIR}/.venv"
 
 mkdir -p \
@@ -18,7 +19,10 @@ mkdir -p \
   "${TEST_DATA_DIR}/db" \
   "${TEST_DATA_DIR}/inkypi" \
   "${TEST_INKYPI_DIR}/src/plugins" \
-  "${TEST_INKYPI_DIR}/src/config"
+  "${TEST_INKYPI_DIR}/src/config" \
+  "${TEST_RUNTIME_DIR}"
+
+ln -snf "${TEST_INKYPI_DIR}/src" "${TEST_RUNTIME_DIR}/src"
 
 cat > "${TEST_CONFIG_FILE}" <<EOF
 telegram:
@@ -62,6 +66,7 @@ display:
 
 inkypi:
   repo_path: ${TEST_INKYPI_DIR}
+  install_path: ${TEST_RUNTIME_DIR}
   validated_commit: test-mode
   waveshare_model: epd7in3e
   plugin_id: telegram_frame

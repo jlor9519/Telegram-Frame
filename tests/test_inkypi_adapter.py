@@ -29,6 +29,7 @@ class InkyPiAdapterTests(unittest.TestCase):
             )
             inkypi_config = InkyPiConfig(
                 repo_path=tmpdir_path / "InkyPi",
+                install_path=tmpdir_path / "usr" / "local" / "inkypi",
                 validated_commit="main",
                 waveshare_model="epd7in3e",
                 plugin_id="telegram_frame",
@@ -56,4 +57,3 @@ class InkyPiAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

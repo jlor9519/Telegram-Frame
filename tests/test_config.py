@@ -54,7 +54,8 @@ class ConfigTests(unittest.TestCase):
                             "divider_color": "#333333",
                         },
                         "inkypi": {
-                            "repo_path": "/opt/InkyPi",
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
                             "validated_commit": "main",
                             "waveshare_model": "epd7in3e",
                             "plugin_id": "telegram_frame",
@@ -78,6 +79,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.security.admin_user_ids, [123])
             self.assertEqual(config.security.whitelisted_user_ids, [456])
             self.assertTrue(str(config.database.path).endswith("data/db/test.db"))
+            self.assertEqual(config.inkypi.repo_path, Path.home() / "InkyPi")
+            self.assertEqual(config.inkypi.install_path, Path("/usr/local/inkypi"))
             self.assertEqual(config.inkypi.waveshare_model, "epd7in3e")
 
     def test_missing_telegram_token_raises_error(self) -> None:
@@ -121,7 +124,8 @@ class ConfigTests(unittest.TestCase):
                             "divider_color": "#333333",
                         },
                         "inkypi": {
-                            "repo_path": "/opt/InkyPi",
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
                             "validated_commit": "main",
                             "waveshare_model": "epd7in3e",
                             "plugin_id": "telegram_frame",
@@ -180,7 +184,8 @@ class ConfigTests(unittest.TestCase):
                             "divider_color": "#333333",
                         },
                         "inkypi": {
-                            "repo_path": "/opt/InkyPi",
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
                             "validated_commit": "main",
                             "waveshare_model": "epd7in3e",
                             "plugin_id": "telegram_frame",
