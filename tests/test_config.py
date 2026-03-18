@@ -81,6 +81,8 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(str(config.database.path).endswith("data/db/test.db"))
             self.assertEqual(config.inkypi.repo_path, Path.home() / "InkyPi")
             self.assertEqual(config.inkypi.install_path, Path("/usr/local/inkypi"))
+            self.assertEqual(config.inkypi.update_method, "command")
+            self.assertEqual(config.inkypi.update_now_url, "http://127.0.0.1/update_now")
             self.assertEqual(config.inkypi.waveshare_model, "epd7in3e")
 
     def test_missing_telegram_token_raises_error(self) -> None:
@@ -214,6 +216,69 @@ class ConfigTests(unittest.TestCase):
                     os.environ["PHOTO_FRAME_ENV_FILE"] = old_env
 
             self.assertEqual(config.telegram.bot_token, "token-from-env")
+
+    def test_load_config_migrates_legacy_restart_command_to_http_update_now(self) -> None:
+        if find_spec("yaml") is None or find_spec("dotenv") is None:
+            self.skipTest("PyYAML and python-dotenv are required for config tests.")
+
+        import yaml
+
+        from app.config import load_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "telegram": {"bot_token_env": "LEGACY_TELEGRAM_TOKEN"},
+                        "security": {},
+                        "database": {"path": "data/db/test.db"},
+                        "storage": {
+                            "incoming_dir": "data/incoming",
+                            "rendered_dir": "data/rendered",
+                            "cache_dir": "data/cache",
+                            "archive_dir": "data/archive",
+                            "inkypi_payload_dir": "data/inkypi",
+                            "current_payload_path": "data/inkypi/current.json",
+                            "current_image_path": "data/inkypi/current.png",
+                            "keep_recent_rendered": 3,
+                        },
+                        "dropbox": {"enabled": False},
+                        "display": {
+                            "width": 800,
+                            "height": 480,
+                            "caption_height": 120,
+                            "margin": 12,
+                            "metadata_font_size": 20,
+                            "caption_font_size": 26,
+                            "max_caption_lines": 2,
+                            "font_path": "/tmp/does-not-exist.ttf",
+                            "background_color": "#FFFFFF",
+                            "text_color": "#000000",
+                            "divider_color": "#333333",
+                        },
+                        "inkypi": {
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
+                            "validated_commit": "main",
+                            "waveshare_model": "epd7in3e",
+                            "plugin_id": "telegram_frame",
+                            "payload_dir": "data/inkypi",
+                            "refresh_command": "sudo systemctl restart inkypi.service",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            os.environ["LEGACY_TELEGRAM_TOKEN"] = "legacy-token"
+            try:
+                config = load_config(config_path)
+            finally:
+                os.environ.pop("LEGACY_TELEGRAM_TOKEN", None)
+
+            self.assertEqual(config.inkypi.update_method, "http_update_now")
+            self.assertEqual(config.inkypi.update_now_url, "http://127.0.0.1/update_now")
 
 
 if __name__ == "__main__":

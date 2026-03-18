@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 from PIL import Image
 
@@ -10,49 +13,144 @@ from app.inkypi_adapter import InkyPiAdapter
 from app.models import DisplayRequest, InkyPiConfig, StorageConfig
 
 
+class _FakeHttpResponse:
+    def __init__(self, body: str, status: int = 200):
+        self._body = body.encode("utf-8")
+        self.status = status
+
+    def __enter__(self) -> _FakeHttpResponse:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
 class InkyPiAdapterTests(unittest.TestCase):
-    def test_display_writes_bridge_payload_and_current_image(self) -> None:
+    def test_display_posts_update_now_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             source_image = tmpdir_path / "rendered.png"
             Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
 
-            storage_config = StorageConfig(
-                incoming_dir=tmpdir_path / "incoming",
-                rendered_dir=tmpdir_path / "rendered",
-                cache_dir=tmpdir_path / "cache",
-                archive_dir=tmpdir_path / "archive",
-                inkypi_payload_dir=tmpdir_path / "inkypi",
-                current_payload_path=tmpdir_path / "inkypi" / "current.json",
-                current_image_path=tmpdir_path / "inkypi" / "current.png",
-                keep_recent_rendered=5,
+            storage_config = self._build_storage(tmpdir_path)
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
             )
-            inkypi_config = InkyPiConfig(
-                repo_path=tmpdir_path / "InkyPi",
-                install_path=tmpdir_path / "usr" / "local" / "inkypi",
-                validated_commit="main",
-                waveshare_model="epd7in3e",
-                plugin_id="telegram_frame",
-                payload_dir=tmpdir_path / "inkypi",
+            adapter = InkyPiAdapter(inkypi_config, storage_config)
+            request = self._build_request(tmpdir_path, source_image)
+
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"success": true, "message": "Display updated"}')) as mocked_urlopen:
+                result = adapter.display(request)
+
+            self.assertTrue(result.success)
+            self.assertEqual(result.message, "Display updated")
+            self.assertTrue(storage_config.current_payload_path.exists())
+            self.assertTrue(storage_config.current_image_path.exists())
+            http_request = mocked_urlopen.call_args.args[0]
+            self.assertEqual(http_request.full_url, "http://127.0.0.1/update_now")
+            self.assertIn(b"plugin_id=telegram_frame", http_request.data)
+
+    def test_display_reports_http_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_image = tmpdir_path / "rendered.png"
+            Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
+
+            storage_config = self._build_storage(tmpdir_path)
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config)
+            request = self._build_request(tmpdir_path, source_image)
+
+            http_error = HTTPError(
+                url="http://127.0.0.1/update_now",
+                code=500,
+                msg="Internal Server Error",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"Plugin not registered"}'),
+            )
+            with patch("app.inkypi_adapter.request.urlopen", side_effect=http_error):
+                result = adapter.display(request)
+
+            self.assertFalse(result.success)
+            self.assertIn("Plugin not registered", result.message)
+
+    def test_display_uses_command_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_image = tmpdir_path / "rendered.png"
+            Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
+
+            storage_config = self._build_storage(tmpdir_path)
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="command",
+                update_now_url="http://127.0.0.1/update_now",
                 refresh_command="python3 -c \"print('refresh ok')\"",
             )
             adapter = InkyPiAdapter(inkypi_config, storage_config)
-            request = DisplayRequest(
-                image_id="img-1",
-                original_path=tmpdir_path / "original.jpg",
-                composed_path=source_image,
-                location="Berlin",
-                taken_at="2026-03-18",
-                caption="Caption",
-                created_at="2026-03-18T12:00:00+00:00",
-                uploaded_by=1,
-            )
+            request = self._build_request(tmpdir_path, source_image)
 
             result = adapter.display(request)
 
             self.assertTrue(result.success)
-            self.assertTrue(storage_config.current_payload_path.exists())
-            self.assertTrue(storage_config.current_image_path.exists())
+            self.assertIn("refresh ok", result.message)
+
+    @staticmethod
+    def _build_storage(tmpdir_path: Path) -> StorageConfig:
+        return StorageConfig(
+            incoming_dir=tmpdir_path / "incoming",
+            rendered_dir=tmpdir_path / "rendered",
+            cache_dir=tmpdir_path / "cache",
+            archive_dir=tmpdir_path / "archive",
+            inkypi_payload_dir=tmpdir_path / "inkypi",
+            current_payload_path=tmpdir_path / "inkypi" / "current.json",
+            current_image_path=tmpdir_path / "inkypi" / "current.png",
+            keep_recent_rendered=5,
+        )
+
+    @staticmethod
+    def _build_config(
+        tmpdir_path: Path,
+        *,
+        update_method: str,
+        update_now_url: str,
+        refresh_command: str,
+    ) -> InkyPiConfig:
+        return InkyPiConfig(
+            repo_path=tmpdir_path / "InkyPi",
+            install_path=tmpdir_path / "usr" / "local" / "inkypi",
+            validated_commit="main",
+            waveshare_model="epd7in3e",
+            plugin_id="telegram_frame",
+            payload_dir=tmpdir_path / "inkypi",
+            update_method=update_method,
+            update_now_url=update_now_url,
+            refresh_command=refresh_command,
+        )
+
+    @staticmethod
+    def _build_request(tmpdir_path: Path, source_image: Path) -> DisplayRequest:
+        return DisplayRequest(
+            image_id="img-1",
+            original_path=tmpdir_path / "original.jpg",
+            composed_path=source_image,
+            location="Berlin",
+            taken_at="2026-03-18",
+            caption="Caption",
+            created_at="2026-03-18T12:00:00+00:00",
+            uploaded_by=1,
+        )
 
 
 if __name__ == "__main__":

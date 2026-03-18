@@ -34,8 +34,16 @@ inkypi_commit="$(get_yaml_value inkypi.validated_commit string)"
 inkypi_commit="${inkypi_commit:-main}"
 waveshare_model="$(get_yaml_value inkypi.waveshare_model string)"
 waveshare_model="${waveshare_model:-epd7in3e}"
+inkypi_update_method="$(get_yaml_value inkypi.update_method string)"
+inkypi_update_now_url="$(get_yaml_value inkypi.update_now_url string)"
 refresh_command="$(get_yaml_value inkypi.refresh_command string)"
-refresh_command="${refresh_command:-sudo systemctl restart inkypi.service}"
+inkypi_update_values=()
+while IFS= read -r line; do
+  inkypi_update_values+=("${line}")
+done < <(resolve_inkypi_update_values "${inkypi_update_method}" "${inkypi_update_now_url}" "${refresh_command}")
+inkypi_update_method="${inkypi_update_values[0]}"
+inkypi_update_now_url="${inkypi_update_values[1]}"
+refresh_command="${inkypi_update_values[2]}"
 
 dropbox_enabled_current="$(get_yaml_value dropbox.enabled bool)"
 if [[ "${dropbox_enabled_current}" == "true" ]]; then
@@ -64,6 +72,8 @@ set_yaml_value inkypi.repo_path string "${inkypi_repo}"
 set_yaml_value inkypi.install_path string "${inkypi_install_path}"
 set_yaml_value inkypi.validated_commit string "${inkypi_commit}"
 set_yaml_value inkypi.waveshare_model string "${waveshare_model}"
+set_yaml_value inkypi.update_method string "${inkypi_update_method}"
+set_yaml_value inkypi.update_now_url string "${inkypi_update_now_url}"
 set_yaml_value inkypi.refresh_command string "${refresh_command}"
 set_yaml_value dropbox.enabled bool "${dropbox_enabled}"
 

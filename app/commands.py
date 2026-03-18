@@ -67,6 +67,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         latest_summary = f"{latest.image_id} ({latest.status})"
 
     active_owner = reservation.owner_user_id if reservation.owner_user_id is not None else "idle"
+    if services.config.inkypi.update_method == "http_update_now":
+        update_target = services.config.inkypi.update_now_url
+    else:
+        update_target = services.config.inkypi.refresh_command
     await update.effective_message.reply_text(
         "\n".join(
             [
@@ -77,7 +81,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"- latest image: {latest_summary}",
                 f"- current reservation: {active_owner}",
                 f"- payload file: {services.config.storage.current_payload_path}",
-                f"- refresh command: {services.config.inkypi.refresh_command}",
+                f"- inkypi update method: {services.config.inkypi.update_method}",
+                f"- inkypi update target: {update_target}",
             ]
         )
     )
@@ -186,4 +191,3 @@ async def stray_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.effective_message.reply_text(
             "You are not whitelisted for this photo frame. Use /myid and share that ID with an admin."
         )
-

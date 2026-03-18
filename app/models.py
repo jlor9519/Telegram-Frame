@@ -64,6 +64,8 @@ class InkyPiConfig:
     waveshare_model: str
     plugin_id: str
     payload_dir: Path
+    update_method: str
+    update_now_url: str
     refresh_command: str
 
 

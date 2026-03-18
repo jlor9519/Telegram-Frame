@@ -71,6 +71,8 @@ inkypi:
   waveshare_model: epd7in3e
   plugin_id: telegram_frame
   payload_dir: ${TEST_DATA_DIR}/inkypi
+  update_method: command
+  update_now_url: http://127.0.0.1/update_now
   refresh_command: echo telegram-test-refresh
 EOF
 

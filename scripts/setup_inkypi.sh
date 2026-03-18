@@ -31,8 +31,16 @@ plugin_id="${plugin_id:-telegram_frame}"
 payload_dir="$(get_yaml_value inkypi.payload_dir string)"
 payload_dir="${payload_dir:-${PROJECT_ROOT}/data/inkypi}"
 payload_dir="$(expand_path "${payload_dir}")"
+update_method="$(get_yaml_value inkypi.update_method string)"
+update_now_url="$(get_yaml_value inkypi.update_now_url string)"
 refresh_command="$(get_yaml_value inkypi.refresh_command string)"
-refresh_command="${refresh_command:-sudo systemctl restart inkypi.service}"
+inkypi_update_values=()
+while IFS= read -r line; do
+  inkypi_update_values+=("${line}")
+done < <(resolve_inkypi_update_values "${update_method}" "${update_now_url}" "${refresh_command}")
+update_method="${inkypi_update_values[0]}"
+update_now_url="${inkypi_update_values[1]}"
+refresh_command="${inkypi_update_values[2]}"
 
 set_yaml_value inkypi.repo_path string "${repo_path}"
 set_yaml_value inkypi.install_path string "${install_path}"
@@ -40,6 +48,8 @@ set_yaml_value inkypi.validated_commit string "${validated_commit}"
 set_yaml_value inkypi.waveshare_model string "${waveshare_model}"
 set_yaml_value inkypi.plugin_id string "${plugin_id}"
 set_yaml_value inkypi.payload_dir string "${payload_dir}"
+set_yaml_value inkypi.update_method string "${update_method}"
+set_yaml_value inkypi.update_now_url string "${update_now_url}"
 set_yaml_value inkypi.refresh_command string "${refresh_command}"
 
 fresh_clone=0
@@ -84,6 +94,7 @@ fi
 
 source_plugin_dir="${PROJECT_ROOT}/integrations/inkypi_plugin/telegram_frame"
 target_plugin_dir="${source_root}/plugins/${plugin_id}"
+echo "Plugin source path: ${source_plugin_dir}"
 echo "Final plugin target path: ${target_plugin_dir}"
 
 if path_is_writable_or_creatable "${source_root}"; then
@@ -95,60 +106,45 @@ else
 fi
 
 payload_json_path="${payload_dir%/}/current.json"
-
+dashboard_seed_result=()
 if path_is_writable_or_creatable "${device_config_path}"; then
-  python3 - "${device_config_path}" "${plugin_id}" "${payload_json_path}" <<'PY'
-import json
+  while IFS= read -r line; do
+    dashboard_seed_result+=("${line}")
+  done < <("${RUN_PYTHON}" - "${device_config_path}" "${plugin_id}" "${payload_json_path}" <<'PY'
+from app.inkypi_setup import seed_dashboard_plugin_instance, verify_seeded_plugin_instance
 import sys
-from pathlib import Path
 
-device_path = Path(sys.argv[1])
+device_path = sys.argv[1]
 plugin_id = sys.argv[2]
 payload_path = sys.argv[3]
-device_path.parent.mkdir(parents=True, exist_ok=True)
-data = {}
-if device_path.exists():
-    data = json.loads(device_path.read_text(encoding="utf-8"))
-
-playlists = data.setdefault("playlists", {})
-if playlists.get("Default"):
-    playlists["Telegram Frame"] = [plugin_id]
-    print("Preserved existing Default playlist and wrote/updated a dedicated 'Telegram Frame' playlist.")
-else:
-    playlists["Default"] = [plugin_id]
-    print("Created Default playlist for the Telegram Frame plugin.")
-plugin_settings = data.setdefault(plugin_id, {})
-plugin_settings["payload_path"] = payload_path
-
-device_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+result = seed_dashboard_plugin_instance(device_path, plugin_id, payload_path)
+if result.applied:
+    verify_seeded_plugin_instance(device_path, plugin_id, payload_path)
+print("1" if result.applied else "0")
+print(result.message)
 PY
+)
 else
-  run_privileged python3 - "${device_config_path}" "${plugin_id}" "${payload_json_path}" <<'PY'
-import json
+  while IFS= read -r line; do
+    dashboard_seed_result+=("${line}")
+  done < <(run_privileged env PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" python3 - "${device_config_path}" "${plugin_id}" "${payload_json_path}" <<'PY'
+from app.inkypi_setup import seed_dashboard_plugin_instance, verify_seeded_plugin_instance
 import sys
-from pathlib import Path
 
-device_path = Path(sys.argv[1])
+device_path = sys.argv[1]
 plugin_id = sys.argv[2]
 payload_path = sys.argv[3]
-device_path.parent.mkdir(parents=True, exist_ok=True)
-data = {}
-if device_path.exists():
-    data = json.loads(device_path.read_text(encoding="utf-8"))
-
-playlists = data.setdefault("playlists", {})
-if playlists.get("Default"):
-    playlists["Telegram Frame"] = [plugin_id]
-    print("Preserved existing Default playlist and wrote/updated a dedicated 'Telegram Frame' playlist.")
-else:
-    playlists["Default"] = [plugin_id]
-    print("Created Default playlist for the Telegram Frame plugin.")
-plugin_settings = data.setdefault(plugin_id, {})
-plugin_settings["payload_path"] = payload_path
-
-device_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+result = seed_dashboard_plugin_instance(device_path, plugin_id, payload_path)
+if result.applied:
+    verify_seeded_plugin_instance(device_path, plugin_id, payload_path)
+print("1" if result.applied else "0")
+print(result.message)
 PY
+)
 fi
+dashboard_seed_applied="${dashboard_seed_result[0]:-0}"
+dashboard_seed_message="${dashboard_seed_result[1]:-Dashboard seed status unavailable.}"
+echo "Dashboard seed status: ${dashboard_seed_message}"
 
 if [[ -x "${repo_path}/install/install.sh" ]]; then
   should_run_inkypi_install=0
@@ -182,41 +178,81 @@ if [[ ! -f "${target_plugin_dir}/plugin-info.json" ]]; then
   exit 1
 fi
 
-python3 - "${device_config_path}" "${plugin_id}" "${payload_json_path}" <<'PY'
+plugin_class_name="$("${RUN_PYTHON}" - "${target_plugin_dir}/plugin-info.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-device_path = Path(sys.argv[1])
-plugin_id = sys.argv[2]
-payload_path = sys.argv[3]
+plugin_info = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(plugin_info.get("class", ""))
+PY
+)"
+if [[ -z "${plugin_class_name}" ]]; then
+  echo >&2 "Plugin verification failed: class name is missing from ${target_plugin_dir}/plugin-info.json."
+  exit 1
+fi
 
-if not device_path.exists():
-    raise SystemExit(f"Device config verification failed: {device_path} does not exist.")
+plugin_verification_python="${install_path}/venv_inkypi/bin/python"
+if [[ ! -x "${plugin_verification_python}" ]]; then
+  plugin_verification_python="${RUN_PYTHON}"
+fi
 
-data = json.loads(device_path.read_text(encoding="utf-8"))
-plugin_settings = data.get(plugin_id)
-if not isinstance(plugin_settings, dict):
-    raise SystemExit(f"Device config verification failed: plugin entry {plugin_id!r} is missing.")
-if plugin_settings.get("payload_path") != payload_path:
-    raise SystemExit(
-        f"Device config verification failed: payload_path is {plugin_settings.get('payload_path')!r}, expected {payload_path!r}."
-    )
+PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${plugin_verification_python}" - "${source_root}" "${plugin_id}" "${plugin_class_name}" <<'PY'
+from app.inkypi_setup import verify_plugin_module_import
+import sys
 
-playlists = data.get("playlists", {})
-if not any(
-    isinstance(items, list) and plugin_id in items
-    for items in playlists.values()
-):
-    raise SystemExit(f"Device config verification failed: no playlist includes plugin {plugin_id!r}.")
+verify_plugin_module_import(sys.argv[1], sys.argv[2], sys.argv[3])
 PY
 
 if [[ "${MOCK_INSTALL}" == "1" ]]; then
-  echo "[mock] Skipping inkypi.service restart and active verification."
+  echo "[mock] Skipping inkypi.service restart and HTTP registration verification."
 elif systemd_unit_exists 'inkypi.service'; then
   echo "Restarting inkypi.service so the plugin is loaded."
   run_privileged systemctl restart inkypi.service
   ensure_systemd_service_active inkypi.service
+
+  if ! "${RUN_PYTHON}" - "${plugin_id}" <<'PY'
+import json
+import sys
+import time
+from urllib import error, request
+
+plugin_id = sys.argv[1]
+url = f"http://127.0.0.1/plugin/{plugin_id}/"
+last_error = "unknown error"
+
+for _ in range(10):
+    try:
+        with request.urlopen(url, timeout=5) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            if body.strip().startswith("{"):
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict) and payload.get("error"):
+                    last_error = str(payload["error"])
+                    time.sleep(1)
+                    continue
+            if "not registered" in body.lower():
+                last_error = body.strip()
+                time.sleep(1)
+                continue
+            raise SystemExit(0)
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        last_error = body.strip() or f"HTTP {exc.code}"
+    except Exception as exc:
+        last_error = str(exc)
+    time.sleep(1)
+
+raise SystemExit(f"InkyPi plugin registration check failed at {url}: {last_error}")
+PY
+  then
+    echo >&2 "Recent inkypi.service journal output:"
+    run_privileged journalctl -u inkypi.service -n 80 --no-pager || true
+    exit 1
+  fi
 else
   echo >&2 "inkypi.service was not found after setup."
   exit 1

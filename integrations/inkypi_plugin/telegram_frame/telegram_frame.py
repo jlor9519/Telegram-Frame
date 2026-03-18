@@ -4,14 +4,7 @@ import json
 from pathlib import Path
 
 from PIL import Image
-
-try:
-    from base_plugin import BasePlugin
-except ImportError:  # pragma: no cover - depends on InkyPi runtime layout
-    try:
-        from plugins.base_plugin import BasePlugin
-    except ImportError:  # pragma: no cover - depends on InkyPi runtime layout
-        from src.plugins.base_plugin import BasePlugin  # type: ignore
+from plugins.base_plugin.base_plugin import BasePlugin
 
 
 class TelegramFrame(BasePlugin):
@@ -34,4 +27,3 @@ class TelegramFrame(BasePlugin):
             raise RuntimeError(f"Bridge image not found: {image_path}")
 
         return Image.open(image_path).convert("RGB")
-

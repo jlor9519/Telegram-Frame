@@ -12,6 +12,9 @@ PROMPT_MODE="${PROMPT_MODE:-interactive}"
 MOCK_INSTALL="${MOCK_INSTALL:-0}"
 MOCK_STATE_DIR="${MOCK_STATE_DIR:-${PROJECT_ROOT}/mock-installation}"
 MOCK_SKIP_PIP="${MOCK_SKIP_PIP:-0}"
+LEGACY_INKYPI_REFRESH_COMMAND="sudo systemctl restart inkypi.service"
+DEFAULT_INKYPI_UPDATE_METHOD="http_update_now"
+DEFAULT_INKYPI_UPDATE_NOW_URL="http://127.0.0.1/update_now"
 export CONFIG_FILE
 export ENV_FILE
 export PHOTO_FRAME_CONFIG="${PHOTO_FRAME_CONFIG:-${CONFIG_FILE}}"
@@ -119,6 +122,35 @@ print(layout.source_origin)
 print("1" if layout.replaced_stale_repo_path else "0")
 print("1" if layout.install_src_exists else "0")
 PY
+}
+
+
+resolve_inkypi_update_values() {
+  local configured_method="${1:-}"
+  local configured_update_now_url="${2:-}"
+  local configured_refresh_command="${3:-}"
+
+  local update_method="${configured_method}"
+  local update_now_url="${configured_update_now_url}"
+  local refresh_command="${configured_refresh_command}"
+
+  if [[ -z "${update_method}" ]]; then
+    if [[ -z "${refresh_command}" || "${refresh_command}" == "${LEGACY_INKYPI_REFRESH_COMMAND}" ]]; then
+      update_method="${DEFAULT_INKYPI_UPDATE_METHOD}"
+    else
+      update_method="command"
+    fi
+  fi
+
+  if [[ -z "${update_now_url}" ]]; then
+    update_now_url="${DEFAULT_INKYPI_UPDATE_NOW_URL}"
+  fi
+
+  if [[ -z "${refresh_command}" ]]; then
+    refresh_command="${LEGACY_INKYPI_REFRESH_COMMAND}"
+  fi
+
+  printf '%s\n%s\n%s\n' "${update_method}" "${update_now_url}" "${refresh_command}"
 }
 
 

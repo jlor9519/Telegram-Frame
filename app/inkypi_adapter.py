@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from urllib import error, parse, request
 from pathlib import Path
 
 from app.models import DisplayRequest, DisplayResult, InkyPiConfig, StorageConfig
@@ -18,25 +19,18 @@ class InkyPiAdapter:
 
     def display(self, request: DisplayRequest) -> DisplayResult:
         payload_path = self._write_bridge_payload(request)
-        command = self._format_refresh_command(payload_path, self.storage.current_image_path)
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip() or completed.stdout.strip() or "unknown refresh error"
-            return DisplayResult(False, f"InkyPi refresh failed: {stderr}", payload_path=payload_path)
-        stdout = completed.stdout.strip() or "refresh command completed successfully"
-        return DisplayResult(True, stdout, payload_path=payload_path)
+        result = self._trigger_display_update(payload_path)
+        result.payload_path = payload_path
+        return result
 
     def refresh_only(self) -> DisplayResult:
-        command = self._format_refresh_command(
-            self.storage.current_payload_path,
-            self.storage.current_image_path,
-        )
+        return self._trigger_display_update(self.storage.current_payload_path)
+
+    def _trigger_display_update(self, payload_path: Path) -> DisplayResult:
+        if self.config.update_method == "http_update_now":
+            return self._post_update_now(payload_path)
+
+        command = self._format_refresh_command(payload_path, self.storage.current_image_path)
         completed = subprocess.run(
             command,
             capture_output=True,
@@ -48,6 +42,58 @@ class InkyPiAdapter:
             stderr = completed.stderr.strip() or completed.stdout.strip() or "unknown refresh error"
             return DisplayResult(False, f"InkyPi refresh failed: {stderr}")
         return DisplayResult(True, completed.stdout.strip() or "refresh command completed successfully")
+
+    def _post_update_now(self, payload_path: Path) -> DisplayResult:
+        form = parse.urlencode(
+            {
+                "plugin_id": self.config.plugin_id,
+                "payload_path": str(payload_path),
+            }
+        ).encode("utf-8")
+        http_request = request.Request(
+            self.config.update_now_url,
+            data=form,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        try:
+            with request.urlopen(http_request, timeout=60) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                return self._parse_http_response(body, response.status)
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            parsed = self._parse_http_response(body, exc.code)
+            if parsed.success:
+                return DisplayResult(False, f"InkyPi update_now returned HTTP {exc.code}")
+            return parsed
+        except error.URLError as exc:
+            return DisplayResult(False, f"InkyPi update_now request failed: {exc.reason}")
+
+    def _parse_http_response(self, body: str, status_code: int) -> DisplayResult:
+        text = body.strip()
+        parsed_json: dict[str, object] | None = None
+
+        if text:
+            try:
+                candidate = json.loads(text)
+            except json.JSONDecodeError:
+                candidate = None
+            if isinstance(candidate, dict):
+                parsed_json = candidate
+
+        if status_code < 200 or status_code >= 300:
+            if parsed_json and parsed_json.get("error"):
+                return DisplayResult(False, f"InkyPi update_now failed: {parsed_json['error']}")
+            return DisplayResult(False, f"InkyPi update_now failed with HTTP {status_code}: {text or 'no response body'}")
+
+        if parsed_json and parsed_json.get("error"):
+            return DisplayResult(False, f"InkyPi update_now failed: {parsed_json['error']}")
+        if parsed_json and parsed_json.get("message"):
+            return DisplayResult(True, str(parsed_json["message"]))
+        if text:
+            return DisplayResult(True, text)
+        return DisplayResult(True, "InkyPi update_now completed successfully")
 
     def _write_bridge_payload(self, request: DisplayRequest) -> Path:
         self.storage.inkypi_payload_dir.mkdir(parents=True, exist_ok=True)

@@ -27,6 +27,9 @@ class ConfigError(ValueError):
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
+DEFAULT_UPDATE_METHOD = "http_update_now"
+DEFAULT_UPDATE_NOW_URL = "http://127.0.0.1/update_now"
+LEGACY_RESTART_REFRESH_COMMAND = "sudo systemctl restart inkypi.service"
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
@@ -114,8 +117,23 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
 
     inkypi_section = raw.get("inkypi", {})
     refresh_command = str(inkypi_section.get("refresh_command", "")).strip()
-    if not refresh_command:
-        errors.append("inkypi.refresh_command is required.")
+    raw_update_method = str(inkypi_section.get("update_method", "")).strip()
+    if raw_update_method:
+        update_method = raw_update_method
+    elif not refresh_command or refresh_command == LEGACY_RESTART_REFRESH_COMMAND:
+        update_method = DEFAULT_UPDATE_METHOD
+    else:
+        update_method = "command"
+
+    if update_method not in {"http_update_now", "command"}:
+        errors.append("inkypi.update_method must be either 'http_update_now' or 'command'.")
+
+    update_now_url = str(inkypi_section.get("update_now_url", DEFAULT_UPDATE_NOW_URL)).strip()
+    if update_method == "http_update_now" and not update_now_url:
+        errors.append("inkypi.update_now_url is required when inkypi.update_method is 'http_update_now'.")
+    if update_method == "command" and not refresh_command:
+        errors.append("inkypi.refresh_command is required when inkypi.update_method is 'command'.")
+
     inkypi_config = InkyPiConfig(
         repo_path=_resolve_path(inkypi_section.get("repo_path", "~/InkyPi")),
         install_path=_resolve_path(inkypi_section.get("install_path", str(DEFAULT_INSTALL_PATH))),
@@ -123,6 +141,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         waveshare_model=str(inkypi_section.get("waveshare_model", "epd7in3e")),
         plugin_id=str(inkypi_section.get("plugin_id", "telegram_frame")),
         payload_dir=_resolve_path(inkypi_section.get("payload_dir", storage_config.inkypi_payload_dir)),
+        update_method=update_method,
+        update_now_url=update_now_url,
         refresh_command=refresh_command,
     )
 

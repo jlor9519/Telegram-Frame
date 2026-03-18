@@ -24,6 +24,17 @@ fi
 
 "${RUN_PYTHON}" -m pip install -r "${PROJECT_ROOT}/requirements.txt"
 
+inkypi_update_method="$(get_yaml_value inkypi.update_method string)"
+inkypi_update_now_url="$(get_yaml_value inkypi.update_now_url string)"
+refresh_command="$(get_yaml_value inkypi.refresh_command string)"
+inkypi_update_values=()
+while IFS= read -r line; do
+  inkypi_update_values+=("${line}")
+done < <(resolve_inkypi_update_values "${inkypi_update_method}" "${inkypi_update_now_url}" "${refresh_command}")
+set_yaml_value inkypi.update_method string "${inkypi_update_values[0]}"
+set_yaml_value inkypi.update_now_url string "${inkypi_update_values[1]}"
+set_yaml_value inkypi.refresh_command string "${inkypi_update_values[2]}"
+
 PROMPT_MODE=missing-only bash "${PROJECT_ROOT}/scripts/setup_dropbox.sh"
 PROMPT_MODE=missing-only bash "${PROJECT_ROOT}/scripts/setup_inkypi.sh"
 initialize_database

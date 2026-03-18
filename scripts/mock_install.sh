@@ -13,6 +13,7 @@ MOCK_LOG_DIR="${MOCK_STATE_DIR}/logs"
 mkdir -p \
   "${MOCK_STATE_DIR}" \
   "${MOCK_INKYPI_DIR}/src/plugins" \
+  "${MOCK_INKYPI_DIR}/src/plugins/base_plugin" \
   "${MOCK_INKYPI_DIR}/src/config" \
   "${MOCK_INKYPI_DIR}/install" \
   "${MOCK_INKYPI_DIR}/.git" \
@@ -31,6 +32,22 @@ ln -snf "${MOCK_INKYPI_DIR}/src" "${MOCK_RUNTIME_DIR}/src"
 if [[ ! -f "${MOCK_INKYPI_DIR}/install/install.sh" ]]; then
   printf '#!/usr/bin/env bash\necho "Mock InkyPi install called with: $*"\n' > "${MOCK_INKYPI_DIR}/install/install.sh"
   chmod +x "${MOCK_INKYPI_DIR}/install/install.sh"
+fi
+
+if [[ ! -f "${MOCK_INKYPI_DIR}/src/plugins/__init__.py" ]]; then
+  printf '' > "${MOCK_INKYPI_DIR}/src/plugins/__init__.py"
+fi
+
+if [[ ! -f "${MOCK_INKYPI_DIR}/src/plugins/base_plugin/__init__.py" ]]; then
+  printf '' > "${MOCK_INKYPI_DIR}/src/plugins/base_plugin/__init__.py"
+fi
+
+if [[ ! -f "${MOCK_INKYPI_DIR}/src/plugins/base_plugin/base_plugin.py" ]]; then
+  cat > "${MOCK_INKYPI_DIR}/src/plugins/base_plugin/base_plugin.py" <<'EOF'
+class BasePlugin:
+    def __init__(self, config=None, **dependencies):
+        self.config = config or {}
+EOF
 fi
 
 cat > "${MOCK_CONFIG_FILE}" <<EOF
@@ -80,6 +97,8 @@ inkypi:
   waveshare_model: epd7in3e
   plugin_id: telegram_frame
   payload_dir: ${MOCK_DATA_DIR}/inkypi
+  update_method: command
+  update_now_url: http://127.0.0.1/update_now
   refresh_command: echo mock-inkypi-refresh
 EOF
 
