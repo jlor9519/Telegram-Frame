@@ -44,7 +44,43 @@ class RenderTests(unittest.TestCase):
             with Image.open(output) as image:
                 self.assertEqual(image.size, (800, 480))
 
+    def test_render_uses_portrait_layout_for_tall_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "portrait.jpg"
+            output = Path(tmpdir) / "output.png"
+            Image.new("RGB", (900, 1600), (12, 140, 220)).save(source)
+
+            renderer = RenderService(
+                DisplayConfig(
+                    width=800,
+                    height=480,
+                    caption_height=132,
+                    margin=18,
+                    metadata_font_size=22,
+                    caption_font_size=28,
+                    max_caption_lines=2,
+                    font_path="/tmp/does-not-exist.ttf",
+                    background_color="#F7F3EA",
+                    text_color="#111111",
+                    divider_color="#3A3A3A",
+                )
+            )
+            renderer.render(
+                source,
+                output,
+                location="",
+                taken_at="",
+                caption="",
+            )
+
+            with Image.open(output) as image:
+                self.assertEqual(image.size, (800, 480))
+                photo_pixel = image.getpixel((220, 220))
+                self.assertTrue(abs(photo_pixel[0] - 12) <= 3)
+                self.assertTrue(abs(photo_pixel[1] - 140) <= 3)
+                self.assertTrue(abs(photo_pixel[2] - 220) <= 3)
+                self.assertEqual(image.getpixel((760, 220)), (247, 243, 234))
+
 
 if __name__ == "__main__":
     unittest.main()
-
