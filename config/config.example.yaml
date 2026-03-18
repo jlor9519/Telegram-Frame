@@ -29,8 +29,9 @@ display:
   height: 480
   caption_height: 44
   margin: 18
-  metadata_font_size: 18
+  metadata_font_size: 14
   caption_font_size: 20
+  caption_character_limit: 72
   max_caption_lines: 1
   font_path: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
   background_color: "#F7F3EA"

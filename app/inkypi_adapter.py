@@ -124,8 +124,10 @@ class InkyPiAdapter:
         payload["orientation_hint"] = orientation_hint
         payload["caption_bar_height"] = self.display_config.caption_height
         payload["caption_font_size"] = self.display_config.caption_font_size
+        payload["caption_character_limit"] = self.display_config.caption_character_limit
         payload["caption_margin"] = self.display_config.margin
         payload["caption_max_lines"] = self.display_config.max_caption_lines
+        payload["metadata_font_size"] = self.display_config.metadata_font_size
         payload["caption_text_color"] = self.display_config.text_color
         payload["caption_background_color"] = "#FFFFFF"
         payload["font_path"] = self.display_config.font_path

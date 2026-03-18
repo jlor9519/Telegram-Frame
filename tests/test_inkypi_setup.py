@@ -127,8 +127,12 @@ class InkyPiSetupTests(unittest.TestCase):
                         "prepared_image_path": str(image_path),
                         "orientation_hint": "horizontal",
                         "caption": "A very long caption that should still end up in a tiny white bar.",
+                        "taken_at": "2026-03-18",
+                        "location": "Berlin, Germany",
                         "caption_bar_height": 44,
                         "caption_font_size": 20,
+                        "metadata_font_size": 14,
+                        "caption_character_limit": 72,
                         "caption_margin": 12,
                         "caption_text_color": "#111111",
                         "caption_background_color": "#FFFFFF",
@@ -145,8 +149,11 @@ class InkyPiSetupTests(unittest.TestCase):
             )
 
             self.assertEqual(generated.size, (800, 480))
-            self.assertEqual(generated.getpixel((790, 470)), (255, 255, 255))
             self.assertNotEqual(generated.getpixel((10, 10)), (255, 255, 255))
+            self.assertEqual(generated.getpixel((2, 470)), (255, 255, 255))
+            self.assertEqual(generated.getpixel((798, 470)), (255, 255, 255))
+            self.assertGreater(self._count_nonwhite_pixels(generated, (12, 438, 280, 478)), 0)
+            self.assertGreater(self._count_nonwhite_pixels(generated, (560, 438, 788, 478)), 0)
 
     def test_plugin_generates_vertical_canvas_for_portrait_images(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -165,8 +172,12 @@ class InkyPiSetupTests(unittest.TestCase):
                         "prepared_image_path": str(image_path),
                         "orientation_hint": "vertical",
                         "caption": "Portrait test",
+                        "taken_at": "2026-03-18",
+                        "location": "Berlin",
                         "caption_bar_height": 44,
                         "caption_font_size": 20,
+                        "metadata_font_size": 14,
+                        "caption_character_limit": 72,
                         "caption_margin": 12,
                         "caption_text_color": "#111111",
                         "caption_background_color": "#FFFFFF",
@@ -183,8 +194,11 @@ class InkyPiSetupTests(unittest.TestCase):
             )
 
             self.assertEqual(generated.size, (480, 800))
-            self.assertEqual(generated.getpixel((470, 790)), (255, 255, 255))
             self.assertNotEqual(generated.getpixel((10, 10)), (255, 255, 255))
+            self.assertEqual(generated.getpixel((2, 790)), (255, 255, 255))
+            self.assertEqual(generated.getpixel((478, 790)), (255, 255, 255))
+            self.assertGreater(self._count_nonwhite_pixels(generated, (12, 758, 170, 798)), 0)
+            self.assertGreater(self._count_nonwhite_pixels(generated, (300, 758, 468, 798)), 0)
 
     def _prepare_plugin_import_tree(self, source_root: Path) -> None:
         plugin_root = source_root / "plugins"
@@ -215,6 +229,10 @@ class InkyPiSetupTests(unittest.TestCase):
                 sys.path.remove(str(source_root))
             except ValueError:
                 pass
+
+    def _count_nonwhite_pixels(self, image, box: tuple[int, int, int, int]) -> int:
+        crop = image.crop(box)
+        return sum(1 for pixel in crop.getdata() if pixel != (255, 255, 255))
 
 
 class _FakeDeviceConfig:

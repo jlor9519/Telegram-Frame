@@ -84,6 +84,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.inkypi.update_method, "command")
             self.assertEqual(config.inkypi.update_now_url, "http://127.0.0.1/update_now")
             self.assertEqual(config.inkypi.waveshare_model, "epd7in3e")
+            self.assertEqual(config.display.caption_character_limit, 72)
 
     def test_missing_telegram_token_raises_error(self) -> None:
         if find_spec("yaml") is None or find_spec("dotenv") is None:
@@ -341,7 +342,9 @@ class ConfigTests(unittest.TestCase):
                 os.environ.pop("COMPACT_TELEGRAM_TOKEN", None)
 
             self.assertEqual(config.display.caption_height, 44)
+            self.assertEqual(config.display.metadata_font_size, 14)
             self.assertEqual(config.display.caption_font_size, 20)
+            self.assertEqual(config.display.caption_character_limit, 72)
             self.assertEqual(config.display.max_caption_lines, 1)
 
 

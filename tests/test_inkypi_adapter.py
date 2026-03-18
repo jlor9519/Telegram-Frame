@@ -55,7 +55,9 @@ class InkyPiAdapterTests(unittest.TestCase):
             self.assertEqual(payload["orientation_hint"], "vertical")
             self.assertEqual(payload["prepared_image_path"], str(storage_config.current_image_path))
             self.assertEqual(payload["caption_bar_height"], 44)
+            self.assertEqual(payload["caption_character_limit"], 72)
             self.assertEqual(payload["caption_max_lines"], 1)
+            self.assertEqual(payload["metadata_font_size"], 14)
 
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
             self.assertEqual(device_config["orientation"], "vertical")
@@ -161,8 +163,9 @@ class InkyPiAdapterTests(unittest.TestCase):
             height=480,
             caption_height=44,
             margin=18,
-            metadata_font_size=18,
+            metadata_font_size=14,
             caption_font_size=20,
+            caption_character_limit=72,
             max_caption_lines=1,
             font_path="/tmp/does-not-exist.ttf",
             background_color="#F7F3EA",

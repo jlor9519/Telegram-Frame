@@ -49,6 +49,7 @@ class DisplayConfig:
     margin: int
     metadata_font_size: int
     caption_font_size: int
+    caption_character_limit: int
     max_caption_lines: int
     font_path: str
     background_color: str
