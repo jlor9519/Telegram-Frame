@@ -3,6 +3,7 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
+ensure_not_running_as_root
 ensure_runtime_files
 
 if ask_yes_no "Install/update apt packages needed for Python, Pillow, and Git?" "y"; then

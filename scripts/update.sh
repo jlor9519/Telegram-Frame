@@ -3,6 +3,7 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
+ensure_not_running_as_root
 ensure_runtime_files
 ensure_venv
 
@@ -21,7 +22,7 @@ if git -C "${PROJECT_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; the
   run_cmd git -C "${PROJECT_ROOT}" pull --ff-only || true
 fi
 
-"${RUN_PIP}" install -r "${PROJECT_ROOT}/requirements.txt"
+"${RUN_PYTHON}" -m pip install -r "${PROJECT_ROOT}/requirements.txt"
 
 PROMPT_MODE=missing-only bash "${PROJECT_ROOT}/scripts/setup_dropbox.sh"
 PROMPT_MODE=missing-only bash "${PROJECT_ROOT}/scripts/setup_inkypi.sh"
@@ -32,4 +33,3 @@ if systemctl list-unit-files | grep -q '^photo-frame\.service'; then
 fi
 
 echo "Update flow completed."
-

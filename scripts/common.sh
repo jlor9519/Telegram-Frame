@@ -8,7 +8,6 @@ ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 VENV_DIR="${VENV_DIR:-${PROJECT_ROOT}/.venv}"
 RUN_PYTHON="${VENV_DIR}/bin/python"
-RUN_PIP="${VENV_DIR}/bin/pip"
 PROMPT_MODE="${PROMPT_MODE:-interactive}"
 MOCK_INSTALL="${MOCK_INSTALL:-0}"
 MOCK_STATE_DIR="${MOCK_STATE_DIR:-${PROJECT_ROOT}/mock-installation}"
@@ -54,6 +53,20 @@ run_privileged() {
 }
 
 
+ensure_not_running_as_root() {
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo >&2 "Do not run this script with sudo."
+    echo >&2 "Run it as your normal user instead, for example:"
+    echo >&2 "  bash scripts/install.sh"
+    echo >&2 "The script already uses sudo internally for apt/systemd steps."
+    exit 1
+  fi
+}
+
+
 ensure_runtime_files() {
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     cp "${CONFIG_EXAMPLE}" "${CONFIG_FILE}"
@@ -73,6 +86,11 @@ ensure_venv() {
   if [[ ! -x "${RUN_PYTHON}" ]]; then
     python3 -m venv "${VENV_DIR}"
   fi
+  if [[ ! -x "${RUN_PYTHON}" ]]; then
+    echo >&2 "Virtualenv creation did not produce ${RUN_PYTHON}."
+    echo >&2 "Please verify that python3-venv is installed and rerun the installer."
+    return 1
+  fi
   if [[ "${MOCK_INSTALL}" == "1" && -x "${RUN_PYTHON}" ]]; then
     if "${RUN_PYTHON}" - <<'PY' >/dev/null 2>&1
 import dropbox
@@ -91,8 +109,17 @@ PY
     RUN_PYTHON="python3"
     return 0
   fi
-  "${RUN_PIP}" install --upgrade pip
-  "${RUN_PIP}" install -r "${PROJECT_ROOT}/requirements.txt"
+  if ! "${RUN_PYTHON}" -m pip --version >/dev/null 2>&1; then
+    echo "pip is missing in ${VENV_DIR}; bootstrapping it with ensurepip."
+    "${RUN_PYTHON}" -m ensurepip --upgrade
+  fi
+  if ! "${RUN_PYTHON}" -m pip --version >/dev/null 2>&1; then
+    echo >&2 "Virtualenv is present but pip could not be initialized."
+    echo >&2 "Install python3-venv/python3-full on the Pi and rerun scripts/install.sh."
+    return 1
+  fi
+  "${RUN_PYTHON}" -m pip install --upgrade pip
+  "${RUN_PYTHON}" -m pip install -r "${PROJECT_ROOT}/requirements.txt"
 }
 
 
