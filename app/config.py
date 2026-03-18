@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import yaml
+from dotenv import load_dotenv
+
+from app.models import (
+    AppConfig,
+    DatabaseConfig,
+    DisplayConfig,
+    DropboxConfig,
+    InkyPiConfig,
+    SecurityConfig,
+    StorageConfig,
+    TelegramConfig,
+)
+
+
+class ConfigError(ValueError):
+    """Raised when the application configuration is invalid."""
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
+DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
+
+
+def load_config(config_path: str | Path | None = None) -> AppConfig:
+    env_path = Path(
+        os.getenv("PHOTO_FRAME_ENV_FILE")
+        or os.getenv("ENV_FILE")
+        or DEFAULT_ENV_PATH
+    )
+    load_dotenv(env_path)
+    path = Path(
+        config_path
+        or os.getenv("PHOTO_FRAME_CONFIG")
+        or os.getenv("CONFIG_FILE")
+        or DEFAULT_CONFIG_PATH
+    )
+    if not path.exists():
+        raise ConfigError(
+            f"Config file not found at {path}. Copy config/config.example.yaml to config/config.yaml first."
+        )
+
+    with path.open("r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+
+    errors: list[str] = []
+
+    telegram_section = raw.get("telegram", {})
+    bot_token_env = str(telegram_section.get("bot_token_env", "TELEGRAM_BOT_TOKEN"))
+    bot_token = os.getenv(bot_token_env, "").strip()
+    if not bot_token:
+        errors.append(f"Missing Telegram bot token in environment variable {bot_token_env}.")
+
+    security_section = raw.get("security", {})
+    admin_user_ids = _parse_int_list(security_section.get("admin_user_ids", []), "security.admin_user_ids", errors)
+    whitelisted_user_ids = _parse_int_list(
+        security_section.get("whitelisted_user_ids", []),
+        "security.whitelisted_user_ids",
+        errors,
+    )
+
+    database_section = raw.get("database", {})
+    database_path = _resolve_path(database_section.get("path", "data/db/photo_frame.db"))
+
+    storage_section = raw.get("storage", {})
+    storage_config = StorageConfig(
+        incoming_dir=_resolve_path(storage_section.get("incoming_dir", "data/incoming")),
+        rendered_dir=_resolve_path(storage_section.get("rendered_dir", "data/rendered")),
+        cache_dir=_resolve_path(storage_section.get("cache_dir", "data/cache")),
+        archive_dir=_resolve_path(storage_section.get("archive_dir", "data/archive")),
+        inkypi_payload_dir=_resolve_path(storage_section.get("inkypi_payload_dir", "data/inkypi")),
+        current_payload_path=_resolve_path(storage_section.get("current_payload_path", "data/inkypi/current.json")),
+        current_image_path=_resolve_path(storage_section.get("current_image_path", "data/inkypi/current.png")),
+        keep_recent_rendered=_parse_positive_int(storage_section.get("keep_recent_rendered", 20), "storage.keep_recent_rendered", errors),
+    )
+
+    dropbox_section = raw.get("dropbox", {})
+    dropbox_env = str(dropbox_section.get("access_token_env", "DROPBOX_ACCESS_TOKEN"))
+    dropbox_token = os.getenv(dropbox_env, "").strip() or None
+    dropbox_config = DropboxConfig(
+        enabled=bool(dropbox_section.get("enabled", False)),
+        access_token=dropbox_token,
+        root_path=str(dropbox_section.get("root_path", "/photo-frame")).rstrip("/") or "/photo-frame",
+        upload_rendered=bool(dropbox_section.get("upload_rendered", True)),
+    )
+    if dropbox_config.enabled and not dropbox_config.access_token:
+        errors.append(
+            f"Dropbox is enabled but no access token is set in environment variable {dropbox_env}."
+        )
+
+    display_section = raw.get("display", {})
+    display_config = DisplayConfig(
+        width=_parse_positive_int(display_section.get("width", 800), "display.width", errors),
+        height=_parse_positive_int(display_section.get("height", 480), "display.height", errors),
+        caption_height=_parse_positive_int(display_section.get("caption_height", 132), "display.caption_height", errors),
+        margin=_parse_positive_int(display_section.get("margin", 18), "display.margin", errors),
+        metadata_font_size=_parse_positive_int(display_section.get("metadata_font_size", 22), "display.metadata_font_size", errors),
+        caption_font_size=_parse_positive_int(display_section.get("caption_font_size", 28), "display.caption_font_size", errors),
+        max_caption_lines=_parse_positive_int(display_section.get("max_caption_lines", 2), "display.max_caption_lines", errors),
+        font_path=str(display_section.get("font_path", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")),
+        background_color=str(display_section.get("background_color", "#F7F3EA")),
+        text_color=str(display_section.get("text_color", "#111111")),
+        divider_color=str(display_section.get("divider_color", "#3A3A3A")),
+    )
+    if display_config.caption_height >= display_config.height:
+        errors.append("display.caption_height must be smaller than display.height.")
+
+    inkypi_section = raw.get("inkypi", {})
+    refresh_command = str(inkypi_section.get("refresh_command", "")).strip()
+    if not refresh_command:
+        errors.append("inkypi.refresh_command is required.")
+    inkypi_config = InkyPiConfig(
+        repo_path=_resolve_path(inkypi_section.get("repo_path", "/opt/InkyPi")),
+        validated_commit=str(inkypi_section.get("validated_commit", "main")),
+        waveshare_model=str(inkypi_section.get("waveshare_model", "epd7in3e")),
+        plugin_id=str(inkypi_section.get("plugin_id", "telegram_frame")),
+        payload_dir=_resolve_path(inkypi_section.get("payload_dir", storage_config.inkypi_payload_dir)),
+        refresh_command=refresh_command,
+    )
+
+    if errors:
+        raise ConfigError("\n".join(errors))
+
+    return AppConfig(
+        telegram=TelegramConfig(bot_token=bot_token),
+        security=SecurityConfig(
+            admin_user_ids=sorted(set(admin_user_ids)),
+            whitelisted_user_ids=sorted(set(whitelisted_user_ids)),
+        ),
+        database=DatabaseConfig(path=database_path),
+        storage=storage_config,
+        dropbox=dropbox_config,
+        display=display_config,
+        inkypi=inkypi_config,
+    )
+
+
+def _resolve_path(value: Any) -> Path:
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+def _parse_int_list(value: Any, field_name: str, errors: list[str]) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        errors.append(f"{field_name} must be a list of integers or a comma-separated string.")
+        return []
+
+    parsed: list[int] = []
+    for item in raw_items:
+        try:
+            parsed.append(int(item))
+        except (TypeError, ValueError):
+            errors.append(f"{field_name} contains a non-numeric Telegram user ID: {item!r}.")
+    return parsed
+
+
+def _parse_positive_int(value: Any, field_name: str, errors: list[str]) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        errors.append(f"{field_name} must be an integer.")
+        return 1
+    if parsed <= 0:
+        errors.append(f"{field_name} must be greater than zero.")
+        return 1
+    return parsed

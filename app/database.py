@@ -1,0 +1,231 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from app.models import ImageRecord
+
+
+def utcnow_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Database:
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._connection.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        self._connection.close()
+
+    def initialize(self) -> None:
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                telegram_user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                display_name TEXT,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                is_whitelisted INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS images (
+                image_id TEXT PRIMARY KEY,
+                telegram_file_id TEXT NOT NULL,
+                local_original_path TEXT NOT NULL,
+                local_rendered_path TEXT,
+                dropbox_original_path TEXT,
+                dropbox_rendered_path TEXT,
+                location TEXT NOT NULL,
+                taken_at TEXT NOT NULL,
+                caption TEXT NOT NULL,
+                uploaded_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                last_error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at DESC);
+            """
+        )
+        self._connection.commit()
+
+    def healthcheck(self) -> bool:
+        row = self._connection.execute("SELECT 1").fetchone()
+        return bool(row and row[0] == 1)
+
+    def ensure_user(
+        self,
+        telegram_user_id: int,
+        username: str | None = None,
+        display_name: str | None = None,
+    ) -> None:
+        existing = self._connection.execute(
+            "SELECT telegram_user_id FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+        if existing:
+            self._connection.execute(
+                """
+                UPDATE users
+                SET username = COALESCE(?, username),
+                    display_name = COALESCE(?, display_name)
+                WHERE telegram_user_id = ?
+                """,
+                (username, display_name, telegram_user_id),
+            )
+        else:
+            self._connection.execute(
+                """
+                INSERT INTO users (
+                    telegram_user_id, username, display_name, is_admin, is_whitelisted, created_at
+                ) VALUES (?, ?, ?, 0, 0, ?)
+                """,
+                (telegram_user_id, username, display_name, utcnow_iso()),
+            )
+        self._connection.commit()
+
+    def seed_admins(self, admin_user_ids: list[int]) -> None:
+        for user_id in admin_user_ids:
+            self.whitelist_user(user_id, is_admin=True)
+
+    def seed_whitelist(self, user_ids: list[int]) -> None:
+        for user_id in user_ids:
+            self.whitelist_user(user_id, is_admin=False)
+
+    def whitelist_user(self, telegram_user_id: int, *, is_admin: bool = False) -> None:
+        self.ensure_user(telegram_user_id)
+        self._connection.execute(
+            """
+            UPDATE users
+            SET is_whitelisted = 1,
+                is_admin = CASE WHEN ? THEN 1 ELSE is_admin END
+            WHERE telegram_user_id = ?
+            """,
+            (1 if is_admin else 0, telegram_user_id),
+        )
+        self._connection.commit()
+
+    def is_whitelisted(self, telegram_user_id: int) -> bool:
+        row = self._connection.execute(
+            "SELECT is_whitelisted FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+        return bool(row and row["is_whitelisted"])
+
+    def is_admin(self, telegram_user_id: int) -> bool:
+        row = self._connection.execute(
+            "SELECT is_admin FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+        return bool(row and row["is_admin"])
+
+    def count_whitelisted_users(self) -> int:
+        row = self._connection.execute(
+            "SELECT COUNT(*) AS count FROM users WHERE is_whitelisted = 1"
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def upsert_image(self, record: ImageRecord) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO images (
+                image_id,
+                telegram_file_id,
+                local_original_path,
+                local_rendered_path,
+                dropbox_original_path,
+                dropbox_rendered_path,
+                location,
+                taken_at,
+                caption,
+                uploaded_by,
+                created_at,
+                status,
+                last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(image_id) DO UPDATE SET
+                telegram_file_id = excluded.telegram_file_id,
+                local_original_path = excluded.local_original_path,
+                local_rendered_path = excluded.local_rendered_path,
+                dropbox_original_path = excluded.dropbox_original_path,
+                dropbox_rendered_path = excluded.dropbox_rendered_path,
+                location = excluded.location,
+                taken_at = excluded.taken_at,
+                caption = excluded.caption,
+                uploaded_by = excluded.uploaded_by,
+                created_at = excluded.created_at,
+                status = excluded.status,
+                last_error = excluded.last_error
+            """,
+            (
+                record.image_id,
+                record.telegram_file_id,
+                record.local_original_path,
+                record.local_rendered_path,
+                record.dropbox_original_path,
+                record.dropbox_rendered_path,
+                record.location,
+                record.taken_at,
+                record.caption,
+                record.uploaded_by,
+                record.created_at,
+                record.status,
+                record.last_error,
+            ),
+        )
+        self._connection.commit()
+
+    def get_latest_image(self) -> ImageRecord | None:
+        row = self._connection.execute(
+            "SELECT * FROM images ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_image(row)
+
+    def _row_to_image(self, row: sqlite3.Row) -> ImageRecord:
+        return ImageRecord(
+            image_id=row["image_id"],
+            telegram_file_id=row["telegram_file_id"],
+            local_original_path=row["local_original_path"],
+            local_rendered_path=row["local_rendered_path"],
+            dropbox_original_path=row["dropbox_original_path"],
+            dropbox_rendered_path=row["dropbox_rendered_path"],
+            location=row["location"],
+            taken_at=row["taken_at"],
+            caption=row["caption"],
+            uploaded_by=row["uploaded_by"],
+            created_at=row["created_at"],
+            status=row["status"],
+            last_error=row["last_error"],
+        )
+
+    def get_setting(self, key: str) -> str | None:
+        row = self._connection.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO settings(key, value) VALUES(?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        self._connection.commit()
+
