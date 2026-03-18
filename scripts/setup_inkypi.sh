@@ -99,7 +99,11 @@ echo "Final plugin target path: ${target_plugin_dir}"
 
 if path_is_writable_or_creatable "${source_root}"; then
   mkdir -p "${source_root}/plugins" "${source_root}/config"
-  rsync -a --delete "${source_plugin_dir}/" "${target_plugin_dir}/"
+  if ! rsync -a --delete "${source_plugin_dir}/" "${target_plugin_dir}/"; then
+    echo "Normal plugin sync failed, retrying with sudo to handle protected files in ${target_plugin_dir}."
+    run_privileged mkdir -p "${source_root}/plugins" "${source_root}/config"
+    run_privileged rsync -a --delete "${source_plugin_dir}/" "${target_plugin_dir}/"
+  fi
 else
   run_privileged mkdir -p "${source_root}/plugins" "${source_root}/config"
   run_privileged rsync -a --delete "${source_plugin_dir}/" "${target_plugin_dir}/"
