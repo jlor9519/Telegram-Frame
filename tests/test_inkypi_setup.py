@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -99,19 +101,7 @@ class InkyPiSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             source_root = tmpdir_path / "src"
-            plugin_root = source_root / "plugins"
-            base_plugin_dir = plugin_root / "base_plugin"
-            telegram_plugin_dir = plugin_root / "telegram_frame"
-
-            base_plugin_dir.mkdir(parents=True)
-            telegram_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
-            (plugin_root / "__init__.py").write_text("", encoding="utf-8")
-            (base_plugin_dir / "__init__.py").write_text("", encoding="utf-8")
-            (base_plugin_dir / "base_plugin.py").write_text(
-                "class BasePlugin:\n    def __init__(self, config=None, **dependencies):\n        self.config = config or {}\n",
-                encoding="utf-8",
-            )
-            shutil.copytree(PROJECT_ROOT / "integrations" / "inkypi_plugin" / "telegram_frame", telegram_plugin_dir)
+            self._prepare_plugin_import_tree(source_root)
 
             verify_plugin_module_import(source_root, "telegram_frame", "TelegramFrame")
 
@@ -119,6 +109,126 @@ class InkyPiSetupTests(unittest.TestCase):
             plugin_class = getattr(plugin_module, "TelegramFrame")
             self.assertEqual(plugin_class.__name__, "TelegramFrame")
             self.assertEqual(DEFAULT_PLUGIN_INSTANCE_NAME, "Telegram Frame")
+
+    def test_plugin_generates_horizontal_canvas_with_white_caption_bar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_root = tmpdir_path / "src"
+            self._prepare_plugin_import_tree(source_root)
+
+            image_path = tmpdir_path / "prepared.png"
+            payload_path = tmpdir_path / "payload.json"
+            from PIL import Image
+
+            Image.new("RGB", (1600, 600), (210, 120, 70)).save(image_path)
+            payload_path.write_text(
+                json.dumps(
+                    {
+                        "prepared_image_path": str(image_path),
+                        "orientation_hint": "horizontal",
+                        "caption": "A very long caption that should still end up in a tiny white bar.",
+                        "caption_bar_height": 44,
+                        "caption_font_size": 20,
+                        "caption_margin": 12,
+                        "caption_text_color": "#111111",
+                        "caption_background_color": "#FFFFFF",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            plugin_class = self._import_plugin_class(source_root)
+            plugin = plugin_class()
+            generated = plugin.generate_image(
+                {"payload_path": str(payload_path)},
+                _FakeDeviceConfig("horizontal", (800, 480)),
+            )
+
+            self.assertEqual(generated.size, (800, 480))
+            self.assertEqual(generated.getpixel((790, 470)), (255, 255, 255))
+            self.assertNotEqual(generated.getpixel((10, 10)), (255, 255, 255))
+
+    def test_plugin_generates_vertical_canvas_for_portrait_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_root = tmpdir_path / "src"
+            self._prepare_plugin_import_tree(source_root)
+
+            image_path = tmpdir_path / "prepared.png"
+            payload_path = tmpdir_path / "payload.json"
+            from PIL import Image
+
+            Image.new("RGB", (600, 1600), (70, 120, 210)).save(image_path)
+            payload_path.write_text(
+                json.dumps(
+                    {
+                        "prepared_image_path": str(image_path),
+                        "orientation_hint": "vertical",
+                        "caption": "Portrait test",
+                        "caption_bar_height": 44,
+                        "caption_font_size": 20,
+                        "caption_margin": 12,
+                        "caption_text_color": "#111111",
+                        "caption_background_color": "#FFFFFF",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            plugin_class = self._import_plugin_class(source_root)
+            plugin = plugin_class()
+            generated = plugin.generate_image(
+                {"payload_path": str(payload_path)},
+                _FakeDeviceConfig("vertical", (800, 480)),
+            )
+
+            self.assertEqual(generated.size, (480, 800))
+            self.assertEqual(generated.getpixel((470, 790)), (255, 255, 255))
+            self.assertNotEqual(generated.getpixel((10, 10)), (255, 255, 255))
+
+    def _prepare_plugin_import_tree(self, source_root: Path) -> None:
+        plugin_root = source_root / "plugins"
+        base_plugin_dir = plugin_root / "base_plugin"
+        telegram_plugin_dir = plugin_root / "telegram_frame"
+
+        base_plugin_dir.mkdir(parents=True)
+        telegram_plugin_dir.parent.mkdir(parents=True, exist_ok=True)
+        (plugin_root / "__init__.py").write_text("", encoding="utf-8")
+        (base_plugin_dir / "__init__.py").write_text("", encoding="utf-8")
+        (base_plugin_dir / "base_plugin.py").write_text(
+            "class BasePlugin:\n    def __init__(self, config=None, **dependencies):\n        self.config = config or {}\n",
+            encoding="utf-8",
+        )
+        shutil.copytree(PROJECT_ROOT / "integrations" / "inkypi_plugin" / "telegram_frame", telegram_plugin_dir)
+
+    def _import_plugin_class(self, source_root: Path):
+        sys.path.insert(0, str(source_root))
+        try:
+            importlib.invalidate_caches()
+            for module_name in list(sys.modules):
+                if module_name == "plugins" or module_name.startswith("plugins."):
+                    sys.modules.pop(module_name, None)
+            module = importlib.import_module("plugins.telegram_frame.telegram_frame")
+            return getattr(module, "TelegramFrame")
+        finally:
+            try:
+                sys.path.remove(str(source_root))
+            except ValueError:
+                pass
+
+
+class _FakeDeviceConfig:
+    def __init__(self, orientation: str, resolution: tuple[int, int]):
+        self._orientation = orientation
+        self._resolution = resolution
+
+    def get_config(self, key: str):
+        if key == "orientation":
+            return self._orientation
+        return None
+
+    def get_resolution(self) -> tuple[int, int]:
+        return self._resolution
 
 
 if __name__ == "__main__":

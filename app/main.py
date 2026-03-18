@@ -45,7 +45,7 @@ def main() -> None:
         auth=AuthService(database),
         storage=storage,
         renderer=RenderService(config.display),
-        display=DisplayService(InkyPiAdapter(config.inkypi, config.storage)),
+        display=DisplayService(InkyPiAdapter(config.inkypi, config.storage, config.display)),
         dropbox=DropboxService(config.dropbox),
     )
 

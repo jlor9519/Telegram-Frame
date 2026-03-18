@@ -30,6 +30,9 @@ DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 DEFAULT_UPDATE_METHOD = "http_update_now"
 DEFAULT_UPDATE_NOW_URL = "http://127.0.0.1/update_now"
 LEGACY_RESTART_REFRESH_COMMAND = "sudo systemctl restart inkypi.service"
+LEGACY_CAPTION_HEIGHT = 132
+LEGACY_CAPTION_FONT_SIZE = 28
+LEGACY_MAX_CAPTION_LINES = 2
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
@@ -99,14 +102,29 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         )
 
     display_section = raw.get("display", {})
+    caption_height_value = display_section.get("caption_height", 44)
+    metadata_font_size_value = display_section.get("metadata_font_size", 18)
+    caption_font_size_value = display_section.get("caption_font_size", 20)
+    max_caption_lines_value = display_section.get("max_caption_lines", 1)
+
+    if (
+        caption_height_value == LEGACY_CAPTION_HEIGHT
+        and caption_font_size_value == LEGACY_CAPTION_FONT_SIZE
+        and max_caption_lines_value == LEGACY_MAX_CAPTION_LINES
+    ):
+        caption_height_value = 44
+        metadata_font_size_value = 18
+        caption_font_size_value = 20
+        max_caption_lines_value = 1
+
     display_config = DisplayConfig(
         width=_parse_positive_int(display_section.get("width", 800), "display.width", errors),
         height=_parse_positive_int(display_section.get("height", 480), "display.height", errors),
-        caption_height=_parse_positive_int(display_section.get("caption_height", 132), "display.caption_height", errors),
+        caption_height=_parse_positive_int(caption_height_value, "display.caption_height", errors),
         margin=_parse_positive_int(display_section.get("margin", 18), "display.margin", errors),
-        metadata_font_size=_parse_positive_int(display_section.get("metadata_font_size", 22), "display.metadata_font_size", errors),
-        caption_font_size=_parse_positive_int(display_section.get("caption_font_size", 28), "display.caption_font_size", errors),
-        max_caption_lines=_parse_positive_int(display_section.get("max_caption_lines", 2), "display.max_caption_lines", errors),
+        metadata_font_size=_parse_positive_int(metadata_font_size_value, "display.metadata_font_size", errors),
+        caption_font_size=_parse_positive_int(caption_font_size_value, "display.caption_font_size", errors),
+        max_caption_lines=_parse_positive_int(max_caption_lines_value, "display.max_caption_lines", errors),
         font_path=str(display_section.get("font_path", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")),
         background_color=str(display_section.get("background_color", "#F7F3EA")),
         text_color=str(display_section.get("text_color", "#111111")),

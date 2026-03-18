@@ -27,11 +27,11 @@ dropbox:
 display:
   width: 800
   height: 480
-  caption_height: 132
+  caption_height: 44
   margin: 18
-  metadata_font_size: 22
-  caption_font_size: 28
-  max_caption_lines: 2
+  metadata_font_size: 18
+  caption_font_size: 20
+  max_caption_lines: 1
   font_path: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
   background_color: "#F7F3EA"
   text_color: "#111111"

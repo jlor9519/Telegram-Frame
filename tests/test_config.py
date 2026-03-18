@@ -280,6 +280,70 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.inkypi.update_method, "http_update_now")
             self.assertEqual(config.inkypi.update_now_url, "http://127.0.0.1/update_now")
 
+    def test_load_config_migrates_legacy_large_caption_defaults_to_compact_bar(self) -> None:
+        if find_spec("yaml") is None or find_spec("dotenv") is None:
+            self.skipTest("PyYAML and python-dotenv are required for config tests.")
+
+        import yaml
+
+        from app.config import load_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "telegram": {"bot_token_env": "COMPACT_TELEGRAM_TOKEN"},
+                        "security": {},
+                        "database": {"path": "data/db/test.db"},
+                        "storage": {
+                            "incoming_dir": "data/incoming",
+                            "rendered_dir": "data/rendered",
+                            "cache_dir": "data/cache",
+                            "archive_dir": "data/archive",
+                            "inkypi_payload_dir": "data/inkypi",
+                            "current_payload_path": "data/inkypi/current.json",
+                            "current_image_path": "data/inkypi/current.png",
+                            "keep_recent_rendered": 3,
+                        },
+                        "dropbox": {"enabled": False},
+                        "display": {
+                            "width": 800,
+                            "height": 480,
+                            "caption_height": 132,
+                            "margin": 18,
+                            "metadata_font_size": 22,
+                            "caption_font_size": 28,
+                            "max_caption_lines": 2,
+                            "font_path": "/tmp/does-not-exist.ttf",
+                            "background_color": "#FFFFFF",
+                            "text_color": "#000000",
+                            "divider_color": "#333333",
+                        },
+                        "inkypi": {
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
+                            "validated_commit": "main",
+                            "waveshare_model": "epd7in3e",
+                            "plugin_id": "telegram_frame",
+                            "payload_dir": "data/inkypi",
+                            "refresh_command": "sudo systemctl restart inkypi.service",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            os.environ["COMPACT_TELEGRAM_TOKEN"] = "compact-token"
+            try:
+                config = load_config(config_path)
+            finally:
+                os.environ.pop("COMPACT_TELEGRAM_TOKEN", None)
+
+            self.assertEqual(config.display.caption_height, 44)
+            self.assertEqual(config.display.caption_font_size, 20)
+            self.assertEqual(config.display.max_caption_lines, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

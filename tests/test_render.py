@@ -11,7 +11,7 @@ from app.render import RenderService
 
 
 class RenderTests(unittest.TestCase):
-    def test_render_creates_expected_canvas_size(self) -> None:
+    def test_render_creates_normalized_png_without_cropping(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "source.jpg"
             output = Path(tmpdir) / "output.png"
@@ -42,9 +42,10 @@ class RenderTests(unittest.TestCase):
 
             self.assertTrue(output.exists())
             with Image.open(output) as image:
-                self.assertEqual(image.size, (800, 480))
+                self.assertEqual(image.size, (1600, 1200))
+                self.assertEqual(image.mode, "RGB")
 
-    def test_render_uses_portrait_layout_for_tall_images(self) -> None:
+    def test_render_preserves_portrait_orientation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "portrait.jpg"
             output = Path(tmpdir) / "output.png"
@@ -74,12 +75,8 @@ class RenderTests(unittest.TestCase):
             )
 
             with Image.open(output) as image:
-                self.assertEqual(image.size, (800, 480))
-                photo_pixel = image.getpixel((220, 220))
-                self.assertTrue(abs(photo_pixel[0] - 12) <= 3)
-                self.assertTrue(abs(photo_pixel[1] - 140) <= 3)
-                self.assertTrue(abs(photo_pixel[2] - 220) <= 3)
-                self.assertEqual(image.getpixel((760, 220)), (247, 243, 234))
+                self.assertEqual(image.size, (900, 1600))
+                self.assertEqual(image.mode, "RGB")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +11,7 @@ from urllib.error import HTTPError
 from PIL import Image
 
 from app.inkypi_adapter import InkyPiAdapter
-from app.models import DisplayRequest, InkyPiConfig, StorageConfig
+from app.models import DisplayConfig, DisplayRequest, InkyPiConfig, StorageConfig
 
 
 class _FakeHttpResponse:
@@ -29,48 +30,79 @@ class _FakeHttpResponse:
 
 
 class InkyPiAdapterTests(unittest.TestCase):
-    def test_display_posts_update_now_success(self) -> None:
+    def test_display_writes_payload_and_switches_orientation_for_portrait(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            source_image = tmpdir_path / "rendered.png"
-            Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
+            source_image = tmpdir_path / "prepared.png"
+            Image.new("RGB", (900, 1600), (123, 111, 99)).save(source_image)
 
             storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
             inkypi_config = self._build_config(
                 tmpdir_path,
                 update_method="http_update_now",
                 update_now_url="http://127.0.0.1/update_now",
                 refresh_command="sudo systemctl restart inkypi.service",
             )
-            adapter = InkyPiAdapter(inkypi_config, storage_config)
-            request = self._build_request(tmpdir_path, source_image)
+            self._write_device_config(tmpdir_path, orientation="horizontal")
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
 
-            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"success": true, "message": "Display updated"}')) as mocked_urlopen:
-                result = adapter.display(request)
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.display(self._build_request(tmpdir_path, source_image))
 
             self.assertTrue(result.success)
-            self.assertEqual(result.message, "Display updated")
-            self.assertTrue(storage_config.current_payload_path.exists())
-            self.assertTrue(storage_config.current_image_path.exists())
-            http_request = mocked_urlopen.call_args.args[0]
-            self.assertEqual(http_request.full_url, "http://127.0.0.1/update_now")
-            self.assertIn(b"plugin_id=telegram_frame", http_request.data)
+            payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["orientation_hint"], "vertical")
+            self.assertEqual(payload["prepared_image_path"], str(storage_config.current_image_path))
+            self.assertEqual(payload["caption_bar_height"], 44)
+            self.assertEqual(payload["caption_max_lines"], 1)
+
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["orientation"], "vertical")
+
+    def test_display_defaults_square_image_to_horizontal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_image = tmpdir_path / "prepared.png"
+            Image.new("RGB", (800, 800), (123, 111, 99)).save(source_image)
+
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(tmpdir_path, orientation="vertical")
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.display(self._build_request(tmpdir_path, source_image))
+
+            self.assertTrue(result.success)
+            payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["orientation_hint"], "horizontal")
+
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["orientation"], "horizontal")
 
     def test_display_reports_http_json_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            source_image = tmpdir_path / "rendered.png"
-            Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
+            source_image = tmpdir_path / "prepared.png"
+            Image.new("RGB", (900, 1600), (123, 111, 99)).save(source_image)
 
             storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
             inkypi_config = self._build_config(
                 tmpdir_path,
                 update_method="http_update_now",
                 update_now_url="http://127.0.0.1/update_now",
                 refresh_command="sudo systemctl restart inkypi.service",
             )
-            adapter = InkyPiAdapter(inkypi_config, storage_config)
-            request = self._build_request(tmpdir_path, source_image)
+            self._write_device_config(tmpdir_path, orientation="horizontal")
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
 
             http_error = HTTPError(
                 url="http://127.0.0.1/update_now",
@@ -80,7 +112,7 @@ class InkyPiAdapterTests(unittest.TestCase):
                 fp=io.BytesIO(b'{"error":"Plugin not registered"}'),
             )
             with patch("app.inkypi_adapter.request.urlopen", side_effect=http_error):
-                result = adapter.display(request)
+                result = adapter.display(self._build_request(tmpdir_path, source_image))
 
             self.assertFalse(result.success)
             self.assertIn("Plugin not registered", result.message)
@@ -88,23 +120,26 @@ class InkyPiAdapterTests(unittest.TestCase):
     def test_display_uses_command_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            source_image = tmpdir_path / "rendered.png"
-            Image.new("RGB", (800, 480), (123, 111, 99)).save(source_image)
+            source_image = tmpdir_path / "prepared.png"
+            Image.new("RGB", (1600, 900), (123, 111, 99)).save(source_image)
 
             storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
             inkypi_config = self._build_config(
                 tmpdir_path,
                 update_method="command",
                 update_now_url="http://127.0.0.1/update_now",
                 refresh_command="python3 -c \"print('refresh ok')\"",
             )
-            adapter = InkyPiAdapter(inkypi_config, storage_config)
-            request = self._build_request(tmpdir_path, source_image)
+            self._write_device_config(tmpdir_path, orientation="vertical")
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
 
-            result = adapter.display(request)
+            result = adapter.display(self._build_request(tmpdir_path, source_image))
 
             self.assertTrue(result.success)
             self.assertIn("refresh ok", result.message)
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["orientation"], "horizontal")
 
     @staticmethod
     def _build_storage(tmpdir_path: Path) -> StorageConfig:
@@ -117,6 +152,22 @@ class InkyPiAdapterTests(unittest.TestCase):
             current_payload_path=tmpdir_path / "inkypi" / "current.json",
             current_image_path=tmpdir_path / "inkypi" / "current.png",
             keep_recent_rendered=5,
+        )
+
+    @staticmethod
+    def _build_display_config() -> DisplayConfig:
+        return DisplayConfig(
+            width=800,
+            height=480,
+            caption_height=44,
+            margin=18,
+            metadata_font_size=18,
+            caption_font_size=20,
+            max_caption_lines=1,
+            font_path="/tmp/does-not-exist.ttf",
+            background_color="#F7F3EA",
+            text_color="#111111",
+            divider_color="#3A3A3A",
         )
 
     @staticmethod
@@ -151,6 +202,12 @@ class InkyPiAdapterTests(unittest.TestCase):
             created_at="2026-03-18T12:00:00+00:00",
             uploaded_by=1,
         )
+
+    @staticmethod
+    def _write_device_config(tmpdir_path: Path, *, orientation: str) -> None:
+        device_config_path = tmpdir_path / "InkyPi" / "src" / "config" / "device.json"
+        device_config_path.parent.mkdir(parents=True, exist_ok=True)
+        device_config_path.write_text(json.dumps({"orientation": orientation}), encoding="utf-8")
 
 
 if __name__ == "__main__":
