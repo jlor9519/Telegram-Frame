@@ -9,17 +9,11 @@ ensure_venv
 
 current_enabled="$(get_yaml_value dropbox.enabled bool)"
 if [[ "${current_enabled}" == "true" ]]; then
-  default_enable="y"
-else
-  default_enable="n"
-fi
-
-if ask_yes_no "Enable Dropbox uploads?" "${default_enable}"; then
-  token="$(prompt_value "Dropbox access token" "$(get_env_value DROPBOX_ACCESS_TOKEN)" "" 0)"
+  token="$(get_or_prompt_value "Dropbox access token" "$(get_env_value DROPBOX_ACCESS_TOKEN)" "" 0)"
   set_env_value DROPBOX_ACCESS_TOKEN "${token}"
   set_yaml_value dropbox.enabled bool "true"
-  if ask_yes_no "Validate the Dropbox token now?" "y"; then
-    "${RUN_PYTHON}" - <<'PY'
+  echo "Validating Dropbox configuration."
+  "${RUN_PYTHON}" - <<'PY'
 from app.config import load_config
 from app.dropbox_client import DropboxService
 
@@ -29,8 +23,6 @@ if not service.enabled:
     raise SystemExit("Dropbox is enabled in config, but the SDK client could not be created.")
 print("Dropbox client configured successfully.")
 PY
-  fi
 else
-  set_yaml_value dropbox.enabled bool "false"
-  echo "Dropbox uploads disabled in config."
+  echo "Dropbox uploads disabled in config. Skipping Dropbox setup."
 fi

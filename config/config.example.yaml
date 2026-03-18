@@ -44,4 +44,3 @@ inkypi:
   plugin_id: telegram_frame
   payload_dir: data/inkypi
   refresh_command: sudo systemctl restart inkypi.service
-

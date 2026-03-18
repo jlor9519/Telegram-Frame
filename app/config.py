@@ -142,7 +142,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
 
 
 def _resolve_path(value: Any) -> Path:
-    path = Path(str(value))
+    expanded = os.path.expandvars(os.path.expanduser(str(value)))
+    path = Path(expanded)
     if path.is_absolute():
         return path
     return PROJECT_ROOT / path

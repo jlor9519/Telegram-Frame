@@ -53,6 +53,62 @@ run_privileged() {
 }
 
 
+systemd_unit_exists() {
+  local unit_name="$1"
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    return 1
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  systemctl list-unit-files 2>/dev/null | grep -q "^${unit_name}\$"
+}
+
+
+expand_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+raw = sys.argv[1]
+print(os.path.abspath(os.path.expandvars(os.path.expanduser(raw))))
+PY
+}
+
+
+path_parent_is_writable() {
+  local target
+  target="$(expand_path "$1")"
+  local parent
+  parent="$(dirname "${target}")"
+  [[ -w "${parent}" ]]
+}
+
+
+path_is_writable_or_creatable() {
+  local target
+  target="$(expand_path "$1")"
+  if [[ -e "${target}" ]]; then
+    [[ -w "${target}" ]]
+    return
+  fi
+  path_parent_is_writable "${target}"
+}
+
+
+get_or_prompt_value() {
+  local label="$1"
+  local current="${2:-}"
+  local default="${3:-}"
+  local secret="${4:-0}"
+  if [[ -n "${current}" ]]; then
+    printf '%s' "${current}"
+    return 0
+  fi
+  prompt_value "${label}" "" "${default}" "${secret}"
+}
+
+
 ensure_not_running_as_root() {
   if [[ "${MOCK_INSTALL}" == "1" ]]; then
     return 0
