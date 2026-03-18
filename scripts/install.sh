@@ -24,6 +24,9 @@ whitelist_ids="$(normalize_id_list "${whitelist_ids}")"
 
 inkypi_repo="$(get_yaml_value inkypi.repo_path string)"
 if [[ -z "${inkypi_repo}" ]]; then
+  inkypi_repo="$(detect_inkypi_repo_from_service inkypi.service || true)"
+fi
+if [[ -z "${inkypi_repo}" ]]; then
   inkypi_repo="/opt/InkyPi"
 fi
 inkypi_commit="$(get_yaml_value inkypi.validated_commit string)"
@@ -69,5 +72,6 @@ bash "${PROJECT_ROOT}/scripts/setup_inkypi.sh"
 echo "Installing/updating photo-frame systemd service for user ${service_user}."
 ensure_service_unit "${service_user}" "${service_workdir}"
 run_privileged systemctl restart photo-frame.service
+ensure_systemd_service_active photo-frame.service
 
 echo "Install flow completed."

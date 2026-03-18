@@ -7,8 +7,31 @@ ensure_not_running_as_root
 ensure_runtime_files
 ensure_venv
 
-repo_path="$(get_yaml_value inkypi.repo_path string)"
-repo_path="${repo_path:-/opt/InkyPi}"
+configured_repo_path="$(get_yaml_value inkypi.repo_path string)"
+detected_repo_path="$(detect_inkypi_repo_from_service inkypi.service || true)"
+
+if [[ -n "${detected_repo_path}" ]]; then
+  if [[ -z "${configured_repo_path}" ]]; then
+    repo_path="${detected_repo_path}"
+    echo "Detected existing InkyPi checkout from inkypi.service at ${repo_path}."
+  elif [[ "${configured_repo_path}" != "${detected_repo_path}" ]]; then
+    if [[ ! -d "${configured_repo_path}" || "${configured_repo_path}" == "/opt/InkyPi" ]]; then
+      repo_path="${detected_repo_path}"
+      echo "Configured InkyPi path ${configured_repo_path} does not match inkypi.service."
+      echo "Using ${repo_path} so the plugin is injected into the running InkyPi installation."
+    else
+      repo_path="${configured_repo_path}"
+      echo "Configured InkyPi path ${configured_repo_path} differs from inkypi.service (${detected_repo_path})."
+      echo "Keeping the configured path."
+    fi
+  else
+    repo_path="${configured_repo_path}"
+  fi
+else
+  repo_path="${configured_repo_path:-/opt/InkyPi}"
+fi
+
+repo_path="$(expand_path "${repo_path}")"
 validated_commit="$(get_yaml_value inkypi.validated_commit string)"
 validated_commit="${validated_commit:-main}"
 waveshare_model="$(get_yaml_value inkypi.waveshare_model string)"
@@ -125,7 +148,7 @@ if [[ -x "${repo_path}/install/install.sh" ]]; then
   should_run_inkypi_install=0
   if [[ "${fresh_clone}" == "1" ]]; then
     should_run_inkypi_install=1
-  elif ! systemd_unit_exists 'inkypi\.service'; then
+  elif ! systemd_unit_exists 'inkypi.service'; then
     should_run_inkypi_install=1
   elif [[ "${INKYPI_FORCE_INSTALL:-0}" == "1" ]]; then
     should_run_inkypi_install=1
@@ -144,7 +167,7 @@ if [[ -x "${repo_path}/install/install.sh" ]]; then
   fi
 fi
 
-if systemd_unit_exists 'inkypi\.service'; then
+if systemd_unit_exists 'inkypi.service'; then
   echo "Restarting inkypi.service so the plugin is loaded."
   run_privileged systemctl restart inkypi.service
 else

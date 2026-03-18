@@ -61,7 +61,62 @@ systemd_unit_exists() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 1
   fi
-  systemctl list-unit-files 2>/dev/null | grep -q "^${unit_name}\$"
+  systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -Fxq "${unit_name}"
+}
+
+
+detect_inkypi_repo_from_service() {
+  local unit_name="${1:-inkypi.service}"
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    return 0
+  fi
+  if ! systemd_unit_exists "${unit_name}"; then
+    return 0
+  fi
+  systemctl cat "${unit_name}" 2>/dev/null | python3 - <<'PY'
+import os
+import re
+import sys
+
+text = sys.stdin.read()
+
+working_dir_match = re.search(r"^WorkingDirectory=(.+)$", text, re.MULTILINE)
+if working_dir_match:
+    working_dir = os.path.abspath(os.path.expanduser(working_dir_match.group(1).strip()))
+    if working_dir.endswith("/src"):
+        print(os.path.dirname(working_dir))
+        raise SystemExit(0)
+    if os.path.basename(working_dir) == "InkyPi" or os.path.exists(os.path.join(working_dir, "src", "inkypi.py")):
+        print(working_dir)
+        raise SystemExit(0)
+
+exec_match = re.search(r"(/[^ \n\"']+/src/inkypi\.py)", text)
+if exec_match:
+    inkypi_py = os.path.abspath(os.path.expanduser(exec_match.group(1)))
+    print(os.path.dirname(os.path.dirname(inkypi_py)))
+PY
+}
+
+
+ensure_systemd_service_active() {
+  local unit_name="$1"
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if systemctl is-active --quiet "${unit_name}"; then
+    return 0
+  fi
+
+  echo >&2 "systemd reports ${unit_name} is not active after restart."
+  echo >&2 "Recent status output:"
+  sudo systemctl status "${unit_name}" --no-pager || true
+  echo >&2
+  echo >&2 "Recent journal output:"
+  sudo journalctl -u "${unit_name}" -n 50 --no-pager || true
+  return 1
 }
 
 
