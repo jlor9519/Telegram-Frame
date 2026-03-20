@@ -140,20 +140,21 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
         updates = {"image_settings": current_image_settings}
 
     try:
-        services.display.patch_device_settings(updates)
+        written_paths = services.display.patch_device_settings(updates)
     except Exception as exc:
         logger.exception("Failed to write device settings")
         await update.effective_message.reply_text(f"Fehler beim Speichern der Einstellungen: {exc}")
         return ConversationHandler.END
 
+    path_note = f" (device.json: {written_paths[0]})" if written_paths else ""
     if s.kind == "orientation":
         inverted_note = " (Bild invertiert: ja)" if text == "vertical" else " (Bild invertiert: nein)"
         await update.effective_message.reply_text(
-            f"Ausrichtung auf {text} gesetzt{inverted_note}.\nNutze /refresh um die Änderung anzuwenden."
+            f"Ausrichtung auf {text} gesetzt{inverted_note}{path_note}.\nNutze /refresh um die Änderung anzuwenden."
         )
     else:
         await update.effective_message.reply_text(
-            f"{s.label} auf {value} gesetzt.\nNutze /refresh um die Änderung anzuwenden."
+            f"{s.label} auf {value} gesetzt{path_note}.\nNutze /refresh um die Änderung anzuwenden."
         )
     return ConversationHandler.END
 
@@ -187,11 +188,11 @@ def build_settings_conversation() -> ConversationHandler:
         states={
             WAITING_FOR_SETTINGS_CHOICE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_settings_choice),
-                MessageHandler(filters.ALL, _settings_unexpected),
+                MessageHandler(filters.ALL & ~filters.COMMAND, _settings_unexpected),
             ],
             WAITING_FOR_SETTINGS_VALUE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_settings_value),
-                MessageHandler(filters.ALL, _settings_unexpected),
+                MessageHandler(filters.ALL & ~filters.COMMAND, _settings_unexpected),
             ],
             ConversationHandler.TIMEOUT: [
                 MessageHandler(filters.ALL, _settings_timeout),

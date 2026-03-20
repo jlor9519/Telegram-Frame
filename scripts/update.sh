@@ -58,8 +58,10 @@ fi
 
 initialize_database
 
-if systemctl list-unit-files | grep -q '^photo-frame\.service'; then
+if systemd_unit_exists 'photo-frame.service'; then
+  echo "Restarting photo-frame.service."
   run_privileged systemctl restart photo-frame.service
+  ensure_systemd_service_active photo-frame.service
 fi
 
 echo "Update completed."

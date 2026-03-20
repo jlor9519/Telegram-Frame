@@ -17,6 +17,19 @@ from PIL import Image
 from app.models import DisplayConfig, DisplayRequest, DisplayResult, InkyPiConfig, StorageConfig
 
 
+def _write_device_json(path: Path, updates: dict[str, object]) -> None:
+    data: dict[str, object] = {}
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(updates)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        temp_path = Path(handle.name)
+    temp_path.replace(path)
+
+
 class InkyPiAdapter:
     def __init__(self, config: InkyPiConfig, storage: StorageConfig, display: DisplayConfig):
         self.config = config
@@ -37,18 +50,20 @@ class InkyPiAdapter:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def patch_device_settings(self, updates: dict[str, object]) -> None:
-        path = self._device_config_path()
-        data: dict[str, object] = {}
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-        data.update(updates)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-            json.dump(data, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            temp_path = Path(handle.name)
-        temp_path.replace(path)
+    def patch_device_settings(self, updates: dict[str, object]) -> list[Path]:
+        paths_to_write: set[Path] = {self._device_config_path()}
+        for candidate in (
+            self.config.repo_path / "src" / "config" / "device.json",
+            self.config.install_path / "src" / "config" / "device.json",
+        ):
+            resolved = candidate.resolve(strict=False)
+            if resolved.exists():
+                paths_to_write.add(resolved)
+        written: list[Path] = []
+        for path in paths_to_write:
+            _write_device_json(path, updates)
+            written.append(path)
+        return written
 
     def refresh_only(self) -> DisplayResult:
         return self._trigger_display_update(self.storage.current_payload_path)
