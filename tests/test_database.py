@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -42,6 +43,45 @@ class DatabaseTests(unittest.TestCase):
             assert latest is not None
             self.assertEqual(latest.image_id, "img-1")
             self.assertEqual(latest.status, "displayed")
+
+
+    def test_concurrent_upsert_image(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database = Database(Path(tmpdir) / "frame.db")
+            database.initialize()
+            database.seed_admins([111])
+            errors: list[Exception] = []
+
+            def upsert_record(index: int) -> None:
+                try:
+                    record = ImageRecord(
+                        image_id=f"img-{index}",
+                        telegram_file_id=f"file-{index}",
+                        local_original_path=f"/tmp/original-{index}.jpg",
+                        local_rendered_path=f"/tmp/rendered-{index}.png",
+                        dropbox_original_path=None,
+                        dropbox_rendered_path=None,
+                        location="Berlin",
+                        taken_at="2026-03-18",
+                        caption=f"Caption {index}",
+                        uploaded_by=111,
+                        created_at=f"2026-03-18T12:00:{index:02d}+00:00",
+                        status="displayed",
+                        last_error=None,
+                    )
+                    database.upsert_image(record)
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=upsert_record, args=(i,)) for i in range(10)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [])
+            latest = database.get_latest_image()
+            self.assertIsNotNone(latest)
 
 
 if __name__ == "__main__":

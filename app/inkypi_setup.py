@@ -12,6 +12,19 @@ DEFAULT_PLAYLIST_NAME = "Default"
 DEFAULT_PLUGIN_INSTANCE_NAME = "Telegram Frame"
 DEFAULT_PLUGIN_REFRESH_INTERVAL = 86400
 
+DEVICE_DEFAULTS: dict[str, Any] = {
+    "orientation": "vertical",
+    "inverted_image": True,
+    "timezone": "Europe/Berlin",
+    "time_format": "24h",
+    "image_settings": {
+        "saturation": 1.4,
+        "contrast": 1.4,
+        "sharpness": 1.2,
+        "brightness": 1.1,
+    },
+}
+
 
 @dataclass(slots=True)
 class DashboardSeedResult:
@@ -79,6 +92,19 @@ def seed_dashboard_plugin_instance(
         False,
         "Skipped dashboard seed because existing playlist data already contains user-managed content.",
     )
+
+
+def seed_device_defaults(device_config_path: str | Path) -> None:
+    """Apply preferred device defaults to device.json (called during setup/reinstall)."""
+    device_path = Path(device_config_path)
+    data = _load_json(device_path)
+    for key, value in DEVICE_DEFAULTS.items():
+        if key == "image_settings":
+            existing = data.setdefault("image_settings", {})
+            existing.update(value)
+        else:
+            data[key] = value
+    _write_json(device_path, data)
 
 
 def verify_seeded_plugin_instance(

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from app.models import DropboxConfig
 
@@ -42,6 +45,7 @@ class DropboxService:
         if self._client is None:
             return None
         remote_path = f"{self.config.root_path}/{remote_folder}/{local_path.name}".replace("//", "/")
+        logger.info("Uploading %s to Dropbox %s", local_path.name, remote_path)
         with local_path.open("rb") as handle:
             self._client.files_upload(
                 handle.read(),
@@ -49,5 +53,6 @@ class DropboxService:
                 mode=WriteMode.overwrite,
                 mute=True,
             )
+        logger.info("Dropbox upload complete: %s", remote_path)
         return remote_path
 

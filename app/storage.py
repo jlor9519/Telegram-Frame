@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 from app.models import StorageConfig
 
@@ -33,9 +36,10 @@ class StorageService:
             key=lambda item: item.stat().st_mtime,
             reverse=True,
         )
-        for old_file in rendered_files[keep:]:
-            if old_file.name == ".gitkeep":
-                continue
+        to_remove = [f for f in rendered_files[keep:] if f.name != ".gitkeep"]
+        if to_remove:
+            logger.info("Cleaning up %d old rendered file(s)", len(to_remove))
+        for old_file in to_remove:
             old_file.unlink(missing_ok=True)
 
     def _directories(self) -> Iterable[Path]:

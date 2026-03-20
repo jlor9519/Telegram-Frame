@@ -113,8 +113,6 @@ Useful commands to try in Telegram:
 - /help
 - /status
 - /whitelist <user_id>
-- /latest
-- /refresh
 - /cancel
 
 You can also send a photo and walk through the full metadata flow.

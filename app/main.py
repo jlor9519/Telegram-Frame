@@ -9,7 +9,6 @@ from app.auth import AuthService
 from app.bot import build_application
 from app.config import load_config
 from app.database import Database
-from app.display import DisplayService
 from app.dropbox_client import DropboxService
 from app.inkypi_adapter import InkyPiAdapter
 from app.logging_setup import configure_logging
@@ -45,7 +44,7 @@ def main() -> None:
         auth=AuthService(database),
         storage=storage,
         renderer=RenderService(config.display),
-        display=DisplayService(InkyPiAdapter(config.inkypi, config.storage, config.display)),
+        display=InkyPiAdapter(config.inkypi, config.storage, config.display),
         dropbox=DropboxService(config.dropbox),
     )
 

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shlex
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from urllib import error, parse, request
+
+logger = logging.getLogger(__name__)
 
 from PIL import Image
 
@@ -21,10 +24,31 @@ class InkyPiAdapter:
         self.display_config = display
 
     def display(self, request: DisplayRequest) -> DisplayResult:
+        logger.info("Writing bridge payload for image %s", request.image_id)
         payload_path = self._write_bridge_payload(request)
         result = self._trigger_display_update(payload_path)
         result.payload_path = payload_path
+        logger.info("Display result for %s: success=%s", request.image_id, result.success)
         return result
+
+    def read_device_settings(self) -> dict[str, object]:
+        path = self._device_config_path()
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def patch_device_settings(self, updates: dict[str, object]) -> None:
+        path = self._device_config_path()
+        data: dict[str, object] = {}
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+        data.update(updates)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            json.dump(data, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            temp_path = Path(handle.name)
+        temp_path.replace(path)
 
     def refresh_only(self) -> DisplayResult:
         return self._trigger_display_update(self.storage.current_payload_path)
@@ -44,16 +68,22 @@ class InkyPiAdapter:
             return orientation_result
 
         if self.config.update_method == "http_update_now":
+            logger.info("Triggering display via HTTP POST to %s", self.config.update_now_url)
             return self._post_update_now(payload_path)
 
         command = self._format_refresh_command(payload_path, self.storage.current_image_path)
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
+        logger.info("Triggering display via command: %s", command)
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Refresh command timed out after 60s")
+            return DisplayResult(False, "InkyPi refresh command timed out after 60 seconds")
         if completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip() or "unknown refresh error"
             return DisplayResult(False, f"InkyPi refresh failed: {stderr}")
@@ -122,7 +152,7 @@ class InkyPiAdapter:
         payload["payload_path"] = str(self.storage.current_payload_path)
         payload["plugin_id"] = self.config.plugin_id
         payload["orientation_hint"] = orientation_hint
-        payload["caption_bar_height"] = self.display_config.caption_height
+        payload["caption_bar_height"] = self.display_config.caption_height if request.show_caption else 0
         payload["caption_font_size"] = self.display_config.caption_font_size
         payload["caption_character_limit"] = self.display_config.caption_character_limit
         payload["caption_margin"] = self.display_config.margin
@@ -186,10 +216,13 @@ class InkyPiAdapter:
             temp_path.replace(device_config_path)
             return None
         except PermissionError as exc:
+            logger.warning("Permission denied patching device orientation: %s", exc)
             return DisplayResult(False, f"Failed to update InkyPi orientation setting: {exc}")
         except OSError as exc:
+            logger.warning("OS error patching device config: %s", exc)
             return DisplayResult(False, f"Failed to update InkyPi device config: {exc}")
         except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON in device config: %s", exc)
             return DisplayResult(False, f"InkyPi device config is invalid JSON: {exc}")
 
     def _format_refresh_command(self, payload_path: Path, image_path: Path) -> list[str]:

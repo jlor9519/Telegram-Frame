@@ -9,7 +9,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import load_config
-from app.display import DisplayService
 from app.inkypi_adapter import InkyPiAdapter
 from app.models import DisplayRequest
 from app.storage import StorageService
@@ -33,10 +32,10 @@ def main() -> None:
     config = load_config(args.config)
     storage = StorageService(config.storage)
     storage.ensure_directories()
-    display = DisplayService(InkyPiAdapter(config.inkypi, config.storage))
+    display = InkyPiAdapter(config.inkypi, config.storage, config.display)
 
     if args.refresh_only:
-        result = display.refresh_current()
+        result = display.refresh_only()
     else:
         if not args.image:
             raise SystemExit("--image is required unless --refresh-only is used")

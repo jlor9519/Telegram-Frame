@@ -44,7 +44,7 @@ class TelegramFrame(BasePlugin):
         orientation = str(payload.get("orientation_hint") or device_config.get_config("orientation") or "horizontal")
         width, height = self._resolve_dimensions(device_config, orientation)
         caption_bar_height = self._safe_int(payload.get("caption_bar_height"), DEFAULT_CAPTION_BAR_HEIGHT)
-        caption_bar_height = max(1, min(caption_bar_height, height - 1))
+        caption_bar_height = max(0, min(caption_bar_height, height - 1))
         photo_height = max(1, height - caption_bar_height)
 
         with Image.open(image_path) as prepared_image:

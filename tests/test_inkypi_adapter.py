@@ -62,6 +62,41 @@ class InkyPiAdapterTests(unittest.TestCase):
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
             self.assertEqual(device_config["orientation"], "vertical")
 
+    def test_display_sets_caption_bar_height_zero_when_show_caption_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_image = tmpdir_path / "prepared.png"
+            Image.new("RGB", (1600, 900), (123, 111, 99)).save(source_image)
+
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(tmpdir_path, orientation="horizontal")
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            request = DisplayRequest(
+                image_id="img-2",
+                original_path=tmpdir_path / "original.jpg",
+                composed_path=source_image,
+                location="",
+                taken_at="",
+                caption="",
+                created_at="2026-03-18T12:00:00+00:00",
+                uploaded_by=1,
+                show_caption=False,
+            )
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.display(request)
+
+            self.assertTrue(result.success)
+            payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["caption_bar_height"], 0)
+
     def test_display_defaults_square_image_to_horizontal(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)

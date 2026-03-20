@@ -5,7 +5,6 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Messag
 from app.commands import (
     cancel_command,
     help_command,
-    latest_command,
     myid_command,
     refresh_command,
     status_command,
@@ -13,6 +12,7 @@ from app.commands import (
     whitelist_command,
 )
 from app.conversations import build_photo_conversation
+from app.settings_conversation import build_settings_conversation
 from app.models import AppServices, ProcessingReservation
 
 
@@ -22,11 +22,11 @@ def build_application(services: AppServices) -> Application:
     application.bot_data["processing_reservation"] = ProcessingReservation()
 
     application.add_handler(build_photo_conversation())
+    application.add_handler(build_settings_conversation())
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("myid", myid_command))
     application.add_handler(CommandHandler("whitelist", whitelist_command))
-    application.add_handler(CommandHandler("latest", latest_command))
     application.add_handler(CommandHandler("refresh", refresh_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, stray_text_handler))

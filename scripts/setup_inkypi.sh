@@ -173,6 +173,21 @@ if [[ -x "${repo_path}/install/install.sh" ]]; then
   fi
 fi
 
+if path_is_writable_or_creatable "${device_config_path}"; then
+  "${RUN_PYTHON}" - "${device_config_path}" <<'PY'
+from app.inkypi_setup import seed_device_defaults
+import sys
+seed_device_defaults(sys.argv[1])
+PY
+else
+  run_privileged env PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" python3 - "${device_config_path}" <<'PY'
+from app.inkypi_setup import seed_device_defaults
+import sys
+seed_device_defaults(sys.argv[1])
+PY
+fi
+echo "Device defaults seeded into ${device_config_path}."
+
 if [[ ! -f "${target_plugin_dir}/telegram_frame.py" ]]; then
   echo >&2 "Plugin verification failed: ${target_plugin_dir}/telegram_frame.py was not created."
   exit 1
