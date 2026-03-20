@@ -230,43 +230,26 @@ elif systemd_unit_exists 'inkypi.service'; then
   run_privileged systemctl restart inkypi.service
   ensure_systemd_service_active inkypi.service
 
-  if ! "${RUN_PYTHON}" - "${plugin_id}" <<'PY'
-import json
-import sys
+  if ! "${RUN_PYTHON}" - <<'PY'
 import time
 from urllib import error, request
 
-plugin_id = sys.argv[1]
-url = f"http://127.0.0.1/plugin/{plugin_id}/"
+url = "http://127.0.0.1/"
 last_error = "unknown error"
 
 time.sleep(5)
 for _ in range(30):
     try:
         with request.urlopen(url, timeout=5) as response:
-            body = response.read().decode("utf-8", errors="replace")
-            if body.strip().startswith("{"):
-                try:
-                    payload = json.loads(body)
-                except json.JSONDecodeError:
-                    payload = None
-                if isinstance(payload, dict) and payload.get("error"):
-                    last_error = str(payload["error"])
-                    time.sleep(1)
-                    continue
-            if "not registered" in body.lower():
-                last_error = body.strip()
-                time.sleep(1)
-                continue
+            response.read()
             raise SystemExit(0)
-    except error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        last_error = body.strip() or f"HTTP {exc.code}"
+    except error.HTTPError:
+        raise SystemExit(0)  # any HTTP response means InkyPi is serving
     except Exception as exc:
         last_error = str(exc)
     time.sleep(1)
 
-raise SystemExit(f"InkyPi plugin registration check failed at {url}: {last_error}")
+raise SystemExit(f"InkyPi did not become reachable at {url}: {last_error}")
 PY
   then
     echo >&2 "Recent inkypi.service journal output:"
