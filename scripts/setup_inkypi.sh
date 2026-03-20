@@ -240,7 +240,8 @@ plugin_id = sys.argv[1]
 url = f"http://127.0.0.1/plugin/{plugin_id}/"
 last_error = "unknown error"
 
-for _ in range(10):
+time.sleep(5)
+for _ in range(30):
     try:
         with request.urlopen(url, timeout=5) as response:
             body = response.read().decode("utf-8", errors="replace")
