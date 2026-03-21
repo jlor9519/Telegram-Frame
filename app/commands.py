@@ -303,6 +303,14 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
         if replacement is None:
             replacement = services.database.get_adjacent_image(image_id, "prev")
 
+        if replacement is None:
+            await query.edit_message_caption(
+                caption="Das letzte Bild kann nicht gelöscht werden. Lade zuerst ein neues Bild hoch."
+            )
+            return
+
+        await query.edit_message_caption(caption=f"Wird gelöscht...")
+
         # Delete from database
         services.database.delete_image(image_id)
 
@@ -312,52 +320,44 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
                 if file_path_str:
                     Path(file_path_str).unlink(missing_ok=True)
 
-        if replacement is not None:
-            rendered_path = Path(replacement.local_rendered_path) if replacement.local_rendered_path else None
-            original_path = Path(replacement.local_original_path)
+        rendered_path = Path(replacement.local_rendered_path) if replacement.local_rendered_path else None
+        original_path = Path(replacement.local_original_path)
 
-            if rendered_path is None or not rendered_path.exists():
-                if not original_path.exists():
-                    await query.edit_message_caption(
-                        caption=f"Bild {image_id} gelöscht. Nächstes Bild nicht verfügbar."
-                    )
-                    return
-                rendered_path = services.storage.rendered_path(replacement.image_id)
-                await asyncio.to_thread(
-                    services.renderer.render,
-                    original_path,
-                    rendered_path,
-                    location=replacement.location,
-                    taken_at=replacement.taken_at,
-                    caption=replacement.caption,
+        if rendered_path is None or not rendered_path.exists():
+            if not original_path.exists():
+                await query.edit_message_caption(
+                    caption=f"Bild {image_id} gelöscht. Nächstes Bild nicht verfügbar."
                 )
-                replacement.local_rendered_path = str(rendered_path)
-                services.database.upsert_image(replacement)
-
-            show_caption = bool(replacement.caption or replacement.location or replacement.taken_at)
-            display_request = DisplayRequest(
-                image_id=replacement.image_id,
-                original_path=original_path,
-                composed_path=rendered_path,
+                return
+            rendered_path = services.storage.rendered_path(replacement.image_id)
+            await asyncio.to_thread(
+                services.renderer.render,
+                original_path,
+                rendered_path,
                 location=replacement.location,
                 taken_at=replacement.taken_at,
                 caption=replacement.caption,
-                created_at=replacement.created_at,
-                uploaded_by=replacement.uploaded_by,
-                show_caption=show_caption,
             )
-            await asyncio.to_thread(services.display.display, display_request)
-            total = services.database.count_displayed_images()
-            await query.edit_message_caption(
-                caption=f"Bild {image_id} gelöscht. Zeige jetzt {replacement.image_id} ({total} Bilder verbleibend)."
-            )
-        else:
-            payload_path = services.config.storage.current_payload_path
-            payload_path.unlink(missing_ok=True)
-            services.config.storage.current_image_path.unlink(missing_ok=True)
-            await query.edit_message_caption(
-                caption=f"Bild {image_id} gelöscht. Keine Bilder mehr vorhanden."
-            )
+            replacement.local_rendered_path = str(rendered_path)
+            services.database.upsert_image(replacement)
+
+        show_caption = bool(replacement.caption or replacement.location or replacement.taken_at)
+        display_request = DisplayRequest(
+            image_id=replacement.image_id,
+            original_path=original_path,
+            composed_path=rendered_path,
+            location=replacement.location,
+            taken_at=replacement.taken_at,
+            caption=replacement.caption,
+            created_at=replacement.created_at,
+            uploaded_by=replacement.uploaded_by,
+            show_caption=show_caption,
+        )
+        await asyncio.to_thread(services.display.display, display_request)
+        total = services.database.count_displayed_images()
+        await query.edit_message_caption(
+            caption=f"Bild {image_id} gelöscht. Zeige jetzt {replacement.image_id} ({total} Bilder verbleibend)."
+        )
 
 
 async def delete_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
