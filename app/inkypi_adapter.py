@@ -287,7 +287,7 @@ class InkyPiAdapter:
     def _write_bridge_payload(self, request: DisplayRequest) -> Path:
         self.storage.inkypi_payload_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(request.composed_path, self.storage.current_image_path)
-        orientation_hint = self._current_orientation_setting()
+        orientation_hint = self.current_orientation()
 
         payload = request.to_payload()
         payload["prepared_image_path"] = str(self.storage.current_image_path)
@@ -331,7 +331,7 @@ class InkyPiAdapter:
     def _device_config_path(self) -> Path:
         return self.layout.device_config_path.resolve(strict=False)
 
-    def _current_orientation_setting(self) -> str:
+    def current_orientation(self) -> str:
         try:
             settings = self.read_device_settings()
         except (OSError, json.JSONDecodeError) as exc:

@@ -52,9 +52,12 @@ class RenderService:
         location: str,
         taken_at: str,
         caption: str,
+        orientation: str = "horizontal",
     ) -> BytesIO:
         width = self.config.width
         height = self.config.height
+        if orientation == "vertical":
+            width, height = height, width
         caption_bar_height = max(0, min(self.config.caption_height, height - 1))
         photo_height = max(1, height - caption_bar_height)
         margin = self.config.margin

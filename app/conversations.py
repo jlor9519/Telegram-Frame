@@ -196,12 +196,14 @@ async def _show_preview(message, context: ContextTypes.DEFAULT_TYPE) -> int:
     if original_path.exists():
         services = get_services(context)
         try:
+            orientation = services.display.current_orientation()
             preview_buf = await asyncio.to_thread(
                 services.renderer.compose_preview,
                 original_path,
                 location=location,
                 taken_at=taken_at,
                 caption=caption,
+                orientation=orientation,
             )
             await message.reply_photo(photo=preview_buf, caption=preview_text, reply_markup=keyboard)
         except Exception:
