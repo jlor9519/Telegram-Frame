@@ -210,6 +210,14 @@ class Database:
                 return None
             return self._row_to_image(row)
 
+    def delete_image(self, image_id: str) -> bool:
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM images WHERE image_id = ?", (image_id,)
+            )
+            self._connection.commit()
+            return cursor.rowcount > 0
+
     def get_image_by_id(self, image_id: str) -> ImageRecord | None:
         with self._lock:
             row = self._connection.execute(

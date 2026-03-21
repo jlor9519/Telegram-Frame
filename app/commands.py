@@ -37,6 +37,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "/help - diese Nachricht anzeigen",
                 "/next - nächstes Bild anzeigen",
                 "/prev - vorheriges Bild anzeigen",
+                "/delete - aktuelles Bild löschen",
                 "/refresh - aktuelles Bild neu laden",
                 "/settings - Anzeigeeinstellungen anzeigen/ändern (nur Admins)",
                 "/status - Systemstatus anzeigen",
@@ -204,6 +205,91 @@ async def next_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @require_whitelist
 async def prev_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _navigate(update, context, "prev")
+
+
+@require_whitelist
+async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    services = get_services(context)
+    message = update.effective_message
+    if message is None:
+        return
+
+    payload_path = services.config.storage.current_payload_path
+    if not payload_path.exists():
+        await message.reply_text("Kein Bild zum Löschen vorhanden.")
+        return
+
+    try:
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        await message.reply_text("Aktuelle Payload-Datei konnte nicht gelesen werden.")
+        return
+
+    current_image_id = payload.get("image_id")
+    if not current_image_id:
+        await message.reply_text("Kein aktuelles Bild erkannt.")
+        return
+
+    record = services.database.get_image_by_id(current_image_id)
+
+    # Try to navigate to next image before deleting, fall back to prev
+    replacement = services.database.get_adjacent_image(current_image_id, "next")
+    if replacement is None:
+        replacement = services.database.get_adjacent_image(current_image_id, "prev")
+
+    # Delete from database
+    services.database.delete_image(current_image_id)
+
+    # Delete local files
+    if record:
+        for file_path_str in (record.local_original_path, record.local_rendered_path):
+            if file_path_str:
+                p = Path(file_path_str)
+                p.unlink(missing_ok=True)
+
+    if replacement is not None:
+        # Show the replacement image
+        rendered_path = Path(replacement.local_rendered_path) if replacement.local_rendered_path else None
+        original_path = Path(replacement.local_original_path)
+
+        if rendered_path is None or not rendered_path.exists():
+            if not original_path.exists():
+                await message.reply_text(f"Bild {current_image_id} gelöscht. Nächstes Bild nicht verfügbar.")
+                return
+            rendered_path = services.storage.rendered_path(replacement.image_id)
+            await asyncio.to_thread(
+                services.renderer.render,
+                original_path,
+                rendered_path,
+                location=replacement.location,
+                taken_at=replacement.taken_at,
+                caption=replacement.caption,
+            )
+            replacement.local_rendered_path = str(rendered_path)
+            services.database.upsert_image(replacement)
+
+        show_caption = bool(replacement.caption or replacement.location or replacement.taken_at)
+        display_request = DisplayRequest(
+            image_id=replacement.image_id,
+            original_path=original_path,
+            composed_path=rendered_path,
+            location=replacement.location,
+            taken_at=replacement.taken_at,
+            caption=replacement.caption,
+            created_at=replacement.created_at,
+            uploaded_by=replacement.uploaded_by,
+            show_caption=show_caption,
+        )
+        await asyncio.to_thread(services.display.display, display_request)
+        total = services.database.count_displayed_images()
+        await message.reply_text(
+            f"Bild {current_image_id} gelöscht. Zeige jetzt {replacement.image_id} ({total} Bilder verbleibend)."
+        )
+    else:
+        # No images left — clean up current state files
+        payload_path.unlink(missing_ok=True)
+        services.config.storage.current_image_path.unlink(missing_ok=True)
+        await message.reply_text(f"Bild {current_image_id} gelöscht. Keine Bilder mehr vorhanden.")
 
 
 async def stray_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

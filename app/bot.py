@@ -4,6 +4,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Messag
 
 from app.commands import (
     cancel_command,
+    delete_command,
     help_command,
     myid_command,
     next_command,
@@ -31,6 +32,7 @@ def build_application(services: AppServices) -> Application:
     application.add_handler(CommandHandler("whitelist", whitelist_command))
     application.add_handler(CommandHandler("next", next_command))
     application.add_handler(CommandHandler("prev", prev_command))
+    application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CommandHandler("refresh", refresh_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, stray_text_handler))
