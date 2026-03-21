@@ -6,6 +6,8 @@ from app.commands import (
     cancel_command,
     help_command,
     myid_command,
+    next_command,
+    prev_command,
     refresh_command,
     status_command,
     stray_text_handler,
@@ -27,6 +29,8 @@ def build_application(services: AppServices) -> Application:
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("myid", myid_command))
     application.add_handler(CommandHandler("whitelist", whitelist_command))
+    application.add_handler(CommandHandler("next", next_command))
+    application.add_handler(CommandHandler("prev", prev_command))
     application.add_handler(CommandHandler("refresh", refresh_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, stray_text_handler))

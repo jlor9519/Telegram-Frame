@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +11,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.auth import require_admin, require_whitelist
-from app.models import AppServices, ProcessingReservation
+from app.models import AppServices, DisplayRequest, ProcessingReservation
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> AppServices:
@@ -33,6 +35,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "",
                 "Befehle:",
                 "/help - diese Nachricht anzeigen",
+                "/next - nächstes Bild anzeigen",
+                "/prev - vorheriges Bild anzeigen",
+                "/refresh - aktuelles Bild neu laden",
                 "/settings - Anzeigeeinstellungen anzeigen/ändern (nur Admins)",
                 "/status - Systemstatus anzeigen",
                 "/myid - deine Telegram-Nutzer-ID anzeigen",
@@ -120,6 +125,85 @@ async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_message.reply_text(
         "Aktualisierung ausgelöst." if result.success else f"Aktualisierung fehlgeschlagen: {result.message}"
     )
+
+
+async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str) -> None:
+    services = get_services(context)
+    message = update.effective_message
+    if message is None:
+        return
+
+    payload_path = services.config.storage.current_payload_path
+    if not payload_path.exists():
+        await message.reply_text("Noch kein Bild vorhanden.")
+        return
+
+    try:
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        await message.reply_text("Aktuelle Payload-Datei konnte nicht gelesen werden.")
+        return
+
+    current_image_id = payload.get("image_id")
+    if not current_image_id:
+        await message.reply_text("Kein aktuelles Bild erkannt.")
+        return
+
+    target = services.database.get_adjacent_image(current_image_id, direction)
+    if target is None:
+        await message.reply_text("Kein weiteres Bild vorhanden.")
+        return
+
+    rendered_path = Path(target.local_rendered_path) if target.local_rendered_path else None
+    original_path = Path(target.local_original_path)
+
+    if rendered_path is None or not rendered_path.exists():
+        if not original_path.exists():
+            await message.reply_text(f"Bilddatei für {target.image_id} nicht mehr vorhanden.")
+            return
+        rendered_path = services.storage.rendered_path(target.image_id)
+        await asyncio.to_thread(
+            services.renderer.render,
+            original_path,
+            rendered_path,
+            location=target.location,
+            taken_at=target.taken_at,
+            caption=target.caption,
+        )
+        target.local_rendered_path = str(rendered_path)
+        services.database.upsert_image(target)
+
+    show_caption = bool(target.caption or target.location or target.taken_at)
+    display_request = DisplayRequest(
+        image_id=target.image_id,
+        original_path=original_path,
+        composed_path=rendered_path,
+        location=target.location,
+        taken_at=target.taken_at,
+        caption=target.caption,
+        created_at=target.created_at,
+        uploaded_by=target.uploaded_by,
+        show_caption=show_caption,
+    )
+
+    result = await asyncio.to_thread(services.display.display, display_request)
+
+    total = services.database.count_displayed_images()
+    position = services.database.get_displayed_image_position(target.image_id)
+    if result.success:
+        await message.reply_text(f"Bild {position} von {total}: {target.image_id}")
+    else:
+        await message.reply_text(f"Anzeige fehlgeschlagen: {result.message}")
+
+
+@require_whitelist
+async def next_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _navigate(update, context, "next")
+
+
+@require_whitelist
+async def prev_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _navigate(update, context, "prev")
 
 
 async def stray_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

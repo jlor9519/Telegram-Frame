@@ -210,6 +210,71 @@ class Database:
                 return None
             return self._row_to_image(row)
 
+    def get_image_by_id(self, image_id: str) -> ImageRecord | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM images WHERE image_id = ?", (image_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_image(row)
+
+    _DISPLAYED_STATUSES = ("displayed", "displayed_with_warnings")
+
+    def get_adjacent_image(self, current_image_id: str, direction: str) -> ImageRecord | None:
+        with self._lock:
+            current = self._connection.execute(
+                "SELECT created_at FROM images WHERE image_id = ?", (current_image_id,)
+            ).fetchone()
+            if current is None:
+                return None
+            current_created_at = current["created_at"]
+
+            if direction == "next":
+                row = self._connection.execute(
+                    "SELECT * FROM images WHERE created_at > ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT 1",
+                    (current_created_at, *self._DISPLAYED_STATUSES),
+                ).fetchone()
+                if row is None:
+                    row = self._connection.execute(
+                        "SELECT * FROM images WHERE image_id != ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT 1",
+                        (current_image_id, *self._DISPLAYED_STATUSES),
+                    ).fetchone()
+            else:
+                row = self._connection.execute(
+                    "SELECT * FROM images WHERE created_at < ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1",
+                    (current_created_at, *self._DISPLAYED_STATUSES),
+                ).fetchone()
+                if row is None:
+                    row = self._connection.execute(
+                        "SELECT * FROM images WHERE image_id != ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1",
+                        (current_image_id, *self._DISPLAYED_STATUSES),
+                    ).fetchone()
+
+            if row is None:
+                return None
+            return self._row_to_image(row)
+
+    def count_displayed_images(self) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COUNT(*) AS count FROM images WHERE status IN (?, ?)",
+                self._DISPLAYED_STATUSES,
+            ).fetchone()
+            return int(row["count"] if row else 0)
+
+    def get_displayed_image_position(self, image_id: str) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT COUNT(*) AS pos FROM images
+                WHERE created_at <= (SELECT created_at FROM images WHERE image_id = ?)
+                AND status IN (?, ?)
+                """,
+                (image_id, *self._DISPLAYED_STATUSES),
+            ).fetchone()
+            return int(row["pos"] if row else 0)
+
     def _row_to_image(self, row: sqlite3.Row) -> ImageRecord:
         return ImageRecord(
             image_id=row["image_id"],
