@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 from plugins.base_plugin.base_plugin import BasePlugin
 
+# Characters DejaVuSans cannot render: emoji, pictographs, variation selectors, ZWJ
+_UNSUPPORTED_RE = re.compile(
+    "["
+    "\U0001F100-\U0001FFFF"  # All SMP emoji / symbols (emoticons, transport, nature, …)
+    "\U00002600-\U000027BF"  # BMP misc symbols & dingbats
+    "\U0000FE00-\U0000FE0F"  # Variation selectors (modify preceding emoji)
+    "\U0000200D"             # Zero-width joiner (emoji sequence connector)
+    "\U000020E3"             # Combining enclosing keycap
+    "]+",
+    flags=re.UNICODE,
+)
 
 DEFAULT_CAPTION_BAR_HEIGHT = 44
 DEFAULT_CAPTION_FONT_SIZE = 20
@@ -198,7 +210,8 @@ class TelegramFrame(BasePlugin):
         return candidate or ellipsis
 
     def _normalize_text(self, text: str) -> str:
-        return " ".join(str(text or "").split())
+        stripped = _UNSUPPORTED_RE.sub("", str(text or ""))
+        return " ".join(stripped.split())
 
     def _truncate_characters(self, text: str, limit: int) -> str:
         if not text or limit <= 0 or len(text) <= limit:
@@ -223,6 +236,9 @@ class TelegramFrame(BasePlugin):
     ) -> list[dict[str, object]]:
         lines: list[dict[str, object]] = []
         for kind, text in (("date", taken_at), ("location", location)):
+            if not text:
+                continue
+            text = self._normalize_text(text)
             if not text:
                 continue
             icon_size = self._icon_size(font)

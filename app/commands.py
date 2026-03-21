@@ -33,7 +33,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "",
                 "Befehle:",
                 "/help - diese Nachricht anzeigen",
-                "/settings - Anzeigeeinstellungen anzeigen/ändern",
+                "/settings - Anzeigeeinstellungen anzeigen/ändern (nur Admins)",
                 "/status - Systemstatus anzeigen",
                 "/myid - deine Telegram-Nutzer-ID anzeigen",
                 "/cancel - den laufenden Upload abbrechen",

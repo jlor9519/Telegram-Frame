@@ -176,6 +176,39 @@ ensure_systemd_service_active() {
 }
 
 
+ensure_inkypi_service_reload_sudoers() {
+  local service_user="$1"
+  local systemctl_bin
+  systemctl_bin="$(command -v systemctl || true)"
+  if [[ -z "${systemctl_bin}" ]]; then
+    echo >&2 "systemctl was not found; cannot install scoped sudoers access for inkypi.service."
+    return 1
+  fi
+
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    echo "[mock sudo] install scoped sudoers access for ${service_user} using ${systemctl_bin}"
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+  cat >"${tmp_file}" <<EOF
+# Managed by Telegram-Frame installer
+${service_user} ALL=(root) NOPASSWD: ${systemctl_bin} restart inkypi.service, ${systemctl_bin} is-active inkypi.service
+EOF
+
+  chmod 440 "${tmp_file}"
+  run_privileged install -m 440 "${tmp_file}" /etc/sudoers.d/photo-frame-inkypi
+  rm -f "${tmp_file}"
+
+  local visudo_bin
+  visudo_bin="$(command -v visudo || true)"
+  if [[ -n "${visudo_bin}" ]]; then
+    run_privileged "${visudo_bin}" -cf /etc/sudoers.d/photo-frame-inkypi >/dev/null
+  fi
+}
+
+
 expand_path() {
   python3 - "$1" <<'PY'
 import os

@@ -143,6 +143,18 @@ class DisplayResult:
 
 
 @dataclass(slots=True)
+class DeviceSettingsApplyResult:
+    success: bool
+    message: str
+    confirmed_settings: dict[str, Any]
+    device_config_path: Path | None = None
+    saved: bool = False
+    reloaded: bool = False
+    refreshed: bool = False
+    refresh_skipped: bool = False
+
+
+@dataclass(slots=True)
 class ProcessingReservation:
     owner_user_id: int | None = None
     image_id: str | None = None

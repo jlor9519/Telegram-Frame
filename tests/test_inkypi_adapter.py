@@ -29,6 +29,13 @@ class _FakeHttpResponse:
         return self._body
 
 
+class _FakeCompletedProcess:
+    def __init__(self, *, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
 class InkyPiAdapterTests(unittest.TestCase):
     def test_display_writes_payload_and_switches_orientation_for_portrait(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -178,6 +185,144 @@ class InkyPiAdapterTests(unittest.TestCase):
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
             self.assertEqual(device_config["orientation"], "horizontal")
 
+    def test_apply_device_settings_saves_reloads_and_refreshes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="horizontal",
+                image_settings={"saturation": 1.4, "contrast": 1.4},
+            )
+            storage_config.current_payload_path.parent.mkdir(parents=True, exist_ok=True)
+            storage_config.current_payload_path.write_text(
+                json.dumps({"orientation_hint": "horizontal"}),
+                encoding="utf-8",
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch(
+                "app.inkypi_adapter.subprocess.run",
+                side_effect=[
+                    _FakeCompletedProcess(returncode=0),
+                    _FakeCompletedProcess(returncode=0, stdout="active\n"),
+                ],
+            ), patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.apply_device_settings({"image_settings": {"saturation": 1.8}})
+
+            self.assertTrue(result.success)
+            self.assertTrue(result.saved)
+            self.assertTrue(result.reloaded)
+            self.assertTrue(result.refreshed)
+            self.assertEqual(result.confirmed_settings["image_settings"]["saturation"], 1.8)
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["image_settings"]["saturation"], 1.8)
+            self.assertEqual(device_config["image_settings"]["contrast"], 1.4)
+
+    def test_apply_device_settings_skips_refresh_without_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="horizontal",
+                image_settings={"saturation": 1.4},
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch(
+                "app.inkypi_adapter.subprocess.run",
+                side_effect=[
+                    _FakeCompletedProcess(returncode=0),
+                    _FakeCompletedProcess(returncode=0, stdout="active\n"),
+                ],
+            ):
+                result = adapter.apply_device_settings({"image_settings": {"saturation": 1.9}})
+
+            self.assertTrue(result.success)
+            self.assertTrue(result.saved)
+            self.assertTrue(result.reloaded)
+            self.assertFalse(result.refreshed)
+            self.assertTrue(result.refresh_skipped)
+            self.assertIn("kein aktuelles Bild", result.message)
+
+    def test_apply_device_settings_reports_restart_failure_but_keeps_saved_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="horizontal",
+                image_settings={"saturation": 1.4},
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch(
+                "app.inkypi_adapter.subprocess.run",
+                return_value=_FakeCompletedProcess(returncode=1, stderr="permission denied"),
+            ):
+                result = adapter.apply_device_settings({"image_settings": {"saturation": 2.0}})
+
+            self.assertFalse(result.success)
+            self.assertTrue(result.saved)
+            self.assertFalse(result.reloaded)
+            self.assertIn("permission denied", result.message)
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["image_settings"]["saturation"], 2.0)
+
+    def test_refresh_only_preserves_existing_image_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="vertical",
+                image_settings={"saturation": 1.7, "contrast": 1.3},
+            )
+            storage_config.current_payload_path.parent.mkdir(parents=True, exist_ok=True)
+            storage_config.current_payload_path.write_text(
+                json.dumps({"orientation_hint": "horizontal"}),
+                encoding="utf-8",
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.refresh_only()
+
+            self.assertTrue(result.success)
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["orientation"], "horizontal")
+            self.assertEqual(device_config["image_settings"]["saturation"], 1.7)
+            self.assertEqual(device_config["image_settings"]["contrast"], 1.3)
+
     @staticmethod
     def _build_storage(tmpdir_path: Path) -> StorageConfig:
         return StorageConfig(
@@ -242,10 +387,18 @@ class InkyPiAdapterTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _write_device_config(tmpdir_path: Path, *, orientation: str) -> None:
+    def _write_device_config(
+        tmpdir_path: Path,
+        *,
+        orientation: str,
+        image_settings: dict[str, float] | None = None,
+    ) -> None:
         device_config_path = tmpdir_path / "InkyPi" / "src" / "config" / "device.json"
         device_config_path.parent.mkdir(parents=True, exist_ok=True)
-        device_config_path.write_text(json.dumps({"orientation": orientation}), encoding="utf-8")
+        payload = {"orientation": orientation}
+        if image_settings is not None:
+            payload["image_settings"] = image_settings
+        device_config_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 if __name__ == "__main__":

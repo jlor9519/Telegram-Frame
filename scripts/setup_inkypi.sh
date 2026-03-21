@@ -52,6 +52,10 @@ set_yaml_value inkypi.update_method string "${update_method}"
 set_yaml_value inkypi.update_now_url string "${update_now_url}"
 set_yaml_value inkypi.refresh_command string "${refresh_command}"
 
+service_user="${SUDO_USER:-$(id -un)}"
+echo "Installing scoped sudoers access so ${service_user} can reload inkypi.service."
+ensure_inkypi_service_reload_sudoers "${service_user}"
+
 fresh_clone=0
 if [[ "${replaced_stale_repo_path}" == "1" ]]; then
   echo "Replaced stale InkyPi repo_path with ${repo_path}."

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from urllib import error, parse, request
 
@@ -14,14 +15,26 @@ logger = logging.getLogger(__name__)
 
 from PIL import Image
 
-from app.models import DisplayConfig, DisplayRequest, DisplayResult, InkyPiConfig, StorageConfig
+from app.inkypi_paths import resolve_inkypi_layout
+from app.models import (
+    DeviceSettingsApplyResult,
+    DisplayConfig,
+    DisplayRequest,
+    DisplayResult,
+    InkyPiConfig,
+    StorageConfig,
+)
+
+
+INKYPI_SERVICE_NAME = "inkypi.service"
+INKYPI_RESTART_TIMEOUT_SECONDS = 45
 
 
 def _write_device_json(path: Path, updates: dict[str, object]) -> None:
     data: dict[str, object] = {}
     if path.exists():
         data = json.loads(path.read_text(encoding="utf-8"))
-    data.update(updates)
+    data = _merge_device_settings(data, updates)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
@@ -30,11 +43,29 @@ def _write_device_json(path: Path, updates: dict[str, object]) -> None:
     temp_path.replace(path)
 
 
+def _merge_device_settings(existing: dict[str, object], updates: dict[str, object]) -> dict[str, object]:
+    merged = dict(existing)
+    for key, value in updates.items():
+        if (
+            key == "image_settings"
+            and isinstance(value, dict)
+            and isinstance(merged.get("image_settings"), dict)
+        ):
+            nested = dict(merged["image_settings"])
+            nested.update(value)
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
+
+
 class InkyPiAdapter:
     def __init__(self, config: InkyPiConfig, storage: StorageConfig, display: DisplayConfig):
         self.config = config
         self.storage = storage
         self.display_config = display
+        self.layout = resolve_inkypi_layout(config.repo_path, config.install_path)
+        self._systemctl_bin = shutil.which("systemctl") or "/usr/bin/systemctl"
 
     def display(self, request: DisplayRequest) -> DisplayResult:
         logger.info("Writing bridge payload for image %s", request.image_id)
@@ -50,20 +81,104 @@ class InkyPiAdapter:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def patch_device_settings(self, updates: dict[str, object]) -> list[Path]:
-        paths_to_write: set[Path] = {self._device_config_path()}
-        for candidate in (
-            self.config.repo_path / "src" / "config" / "device.json",
-            self.config.install_path / "src" / "config" / "device.json",
-        ):
-            resolved = candidate.resolve(strict=False)
-            if resolved.exists():
-                paths_to_write.add(resolved)
-        written: list[Path] = []
-        for path in paths_to_write:
-            _write_device_json(path, updates)
-            written.append(path)
-        return written
+    def apply_device_settings(
+        self,
+        updates: dict[str, object],
+        *,
+        refresh_current: bool = True,
+    ) -> DeviceSettingsApplyResult:
+        device_config_path = self._device_config_path()
+        try:
+            current = self.read_device_settings()
+            merged = _merge_device_settings(current, updates)
+            _write_device_json(device_config_path, merged)
+            confirmed = self.read_device_settings()
+        except PermissionError as exc:
+            logger.warning("Permission denied saving device settings: %s", exc)
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=f"Einstellungen konnten nicht gespeichert werden: {exc}",
+                confirmed_settings={},
+                device_config_path=device_config_path,
+            )
+        except OSError as exc:
+            logger.warning("OS error saving device settings: %s", exc)
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=f"Einstellungen konnten nicht gespeichert werden: {exc}",
+                confirmed_settings={},
+                device_config_path=device_config_path,
+            )
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON in device settings file: %s", exc)
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=f"device.json ist ungültiges JSON: {exc}",
+                confirmed_settings={},
+                device_config_path=device_config_path,
+            )
+
+        restart_error = self._restart_inkypi_service()
+        if restart_error is not None:
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=(
+                    "Einstellungen wurden gespeichert, aber InkyPi konnte nicht neu geladen werden: "
+                    f"{restart_error}"
+                ),
+                confirmed_settings=confirmed,
+                device_config_path=device_config_path,
+                saved=True,
+            )
+
+        if not refresh_current:
+            return DeviceSettingsApplyResult(
+                success=True,
+                message="Einstellungen wurden gespeichert und InkyPi wurde neu geladen.",
+                confirmed_settings=confirmed,
+                device_config_path=device_config_path,
+                saved=True,
+                reloaded=True,
+                refresh_skipped=True,
+            )
+
+        if not self.storage.current_payload_path.exists():
+            return DeviceSettingsApplyResult(
+                success=True,
+                message=(
+                    "Einstellungen wurden gespeichert und InkyPi wurde neu geladen. "
+                    "Es gibt noch kein aktuelles Bild, daher wurde keine Live-Aktualisierung ausgelost."
+                ),
+                confirmed_settings=confirmed,
+                device_config_path=device_config_path,
+                saved=True,
+                reloaded=True,
+                refresh_skipped=True,
+            )
+
+        refresh_result = self._trigger_display_update(self.storage.current_payload_path)
+        if not refresh_result.success:
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=(
+                    "Einstellungen wurden gespeichert und InkyPi wurde neu geladen, "
+                    f"aber die Anzeige-Aktualisierung ist fehlgeschlagen: {refresh_result.message}"
+                ),
+                confirmed_settings=confirmed,
+                device_config_path=device_config_path,
+                saved=True,
+                reloaded=True,
+            )
+
+        return DeviceSettingsApplyResult(
+            success=True,
+            message="Einstellungen wurden gespeichert, InkyPi wurde neu geladen und die Anzeige aktualisiert.",
+            confirmed_settings=confirmed,
+            device_config_path=device_config_path,
+            saved=True,
+            reloaded=True,
+            refreshed=True,
+        )
 
     def refresh_only(self) -> DisplayResult:
         return self._trigger_display_update(self.storage.current_payload_path)
@@ -205,10 +320,7 @@ class InkyPiAdapter:
             return "vertical" if image.height > image.width else "horizontal"
 
     def _device_config_path(self) -> Path:
-        install_device_path = self.config.install_path / "src" / "config" / "device.json"
-        if install_device_path.exists():
-            return install_device_path.resolve(strict=False)
-        return (self.config.repo_path / "src" / "config" / "device.json").resolve(strict=False)
+        return self.layout.device_config_path.resolve(strict=False)
 
     def _patch_device_orientation(self, orientation_hint: str) -> DisplayResult | None:
         device_config_path = self._device_config_path()
@@ -249,3 +361,64 @@ class InkyPiAdapter:
             plugin_id=self.config.plugin_id,
         )
         return shlex.split(command)
+
+    def _restart_inkypi_service(self) -> str | None:
+        sudo_bin = shutil.which("sudo")
+        if sudo_bin is None:
+            return "sudo ist nicht verfugbar."
+
+        restart_command = [
+            sudo_bin,
+            "-n",
+            self._systemctl_bin,
+            "restart",
+            INKYPI_SERVICE_NAME,
+        ]
+        try:
+            restart_completed = subprocess.run(
+                restart_command,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return "Neustart von inkypi.service hat das Zeitlimit uberschritten."
+
+        if restart_completed.returncode != 0:
+            stderr = restart_completed.stderr.strip() or restart_completed.stdout.strip() or "unbekannter Fehler"
+            if "password is required" in stderr.lower() or "a password is required" in stderr.lower():
+                return (
+                    "nicht-interaktive sudo-Rechte fur inkypi.service fehlen. "
+                    "Fuhre scripts/setup_inkypi.sh erneut aus."
+                )
+            return stderr
+
+        deadline = time.monotonic() + INKYPI_RESTART_TIMEOUT_SECONDS
+        status_command = [
+            sudo_bin,
+            "-n",
+            self._systemctl_bin,
+            "is-active",
+            INKYPI_SERVICE_NAME,
+        ]
+        last_status = "inkypi.service ist nicht aktiv geworden."
+        while time.monotonic() < deadline:
+            try:
+                status_completed = subprocess.run(
+                    status_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                last_status = "Abfrage von inkypi.service hat das Zeitlimit uberschritten."
+                time.sleep(1)
+                continue
+            if status_completed.returncode == 0 and status_completed.stdout.strip() == "active":
+                return None
+            last_status = status_completed.stderr.strip() or status_completed.stdout.strip() or last_status
+            time.sleep(1)
+
+        return last_status
