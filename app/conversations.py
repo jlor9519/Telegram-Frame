@@ -197,6 +197,7 @@ async def _show_preview(message, context: ContextTypes.DEFAULT_TYPE) -> int:
         services = get_services(context)
         try:
             orientation = services.display.current_orientation()
+            fit_mode = services.database.get_setting("image_fit_mode") or "fill"
             preview_buf = await asyncio.to_thread(
                 services.renderer.compose_preview,
                 original_path,
@@ -204,6 +205,7 @@ async def _show_preview(message, context: ContextTypes.DEFAULT_TYPE) -> int:
                 taken_at=taken_at,
                 caption=caption,
                 orientation=orientation,
+                fit_mode=fit_mode,
             )
             await message.reply_photo(photo=preview_buf, caption=preview_text, reply_markup=keyboard)
         except Exception:
@@ -352,9 +354,10 @@ async def _submit_photo(
     services.database.upsert_image(record)
     await message.reply_text("Dein Foto wird jetzt verarbeitet.")
 
+    fit_mode = services.database.get_setting("image_fit_mode") or "fill"
     rendered_path = services.storage.rendered_path(record.image_id)
     try:
-        record, warnings = await _process_image(services, record, rendered_path, show_caption=show_caption)
+        record, warnings = await _process_image(services, record, rendered_path, show_caption=show_caption, fit_mode=fit_mode)
         services.database.upsert_image(record)
         await message.reply_text(_build_success_reply(record, warnings))
         return ConversationHandler.END
@@ -375,7 +378,7 @@ async def _submit_photo(
 
 
 async def _process_image(
-    services: Any, record: ImageRecord, rendered_path: Path, *, show_caption: bool = True
+    services: Any, record: ImageRecord, rendered_path: Path, *, show_caption: bool = True, fit_mode: str = "fill",
 ) -> tuple[ImageRecord, list[str]]:
     warnings: list[str] = []
 
@@ -412,6 +415,7 @@ async def _process_image(
         created_at=record.created_at,
         uploaded_by=record.uploaded_by,
         show_caption=show_caption,
+        fit_mode=fit_mode,
     )
     logger.info("Sending image %s to display", record.image_id)
     display_result = await asyncio.to_thread(services.display.display, display_request)

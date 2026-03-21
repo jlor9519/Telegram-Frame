@@ -197,6 +197,7 @@ async def _navigate_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         services.database.upsert_image(target)
 
     show_caption = bool(target.caption or target.location or target.taken_at)
+    fit_mode = services.database.get_setting("image_fit_mode") or "fill"
     display_request = DisplayRequest(
         image_id=target.image_id,
         original_path=original_path,
@@ -207,6 +208,7 @@ async def _navigate_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         created_at=target.created_at,
         uploaded_by=target.uploaded_by,
         show_caption=show_caption,
+        fit_mode=fit_mode,
     )
 
     result = await asyncio.to_thread(services.display.display, display_request)
@@ -342,6 +344,7 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
             services.database.upsert_image(replacement)
 
         show_caption = bool(replacement.caption or replacement.location or replacement.taken_at)
+        fit_mode = services.database.get_setting("image_fit_mode") or "fill"
         display_request = DisplayRequest(
             image_id=replacement.image_id,
             original_path=original_path,
@@ -352,6 +355,7 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
             created_at=replacement.created_at,
             uploaded_by=replacement.uploaded_by,
             show_caption=show_caption,
+            fit_mode=fit_mode,
         )
         await asyncio.to_thread(services.display.display, display_request)
         total = services.database.count_displayed_images()

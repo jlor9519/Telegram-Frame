@@ -19,18 +19,32 @@ PENDING_SETTINGS_KEY = "pending_settings_choice"
 @dataclass(slots=True)
 class _SettingDef:
     label: str
-    key: str               # top-level key in device.json
+    key: str               # top-level key in device.json, or db setting key
     subkey: str | None     # key inside image_settings, or None
-    kind: str              # "float" | "orientation"
+    kind: str              # "float" | "orientation" | "fit_mode"
 
 
 _SETTINGS: list[_SettingDef] = [
-    _SettingDef("Sättigung",    "image_settings", "saturation", "float"),
-    _SettingDef("Kontrast",     "image_settings", "contrast",   "float"),
-    _SettingDef("Schärfe",      "image_settings", "sharpness",  "float"),
-    _SettingDef("Helligkeit",   "image_settings", "brightness", "float"),
-    _SettingDef("Ausrichtung",  "orientation",    None,         "orientation"),
+    _SettingDef("Sättigung",      "image_settings", "saturation", "float"),
+    _SettingDef("Kontrast",       "image_settings", "contrast",   "float"),
+    _SettingDef("Schärfe",        "image_settings", "sharpness",  "float"),
+    _SettingDef("Helligkeit",     "image_settings", "brightness", "float"),
+    _SettingDef("Ausrichtung",    "orientation",    None,         "orientation"),
+    _SettingDef("Bildanpassung",  "image_fit_mode", None,         "fit_mode"),
 ]
+
+_FIT_MODE_LABELS = {"fill": "Zuschneiden", "contain": "Einpassen"}
+
+_FIT_MODE_MAP = {
+    "zuschneiden": "fill",
+    "fill": "fill",
+    "crop": "fill",
+    "füllen": "fill",
+    "einpassen": "contain",
+    "contain": "contain",
+    "letterbox": "contain",
+    "anpassen": "contain",
+}
 
 
 def _get_current_value(settings: dict[str, Any], s: _SettingDef) -> str:
@@ -38,13 +52,16 @@ def _get_current_value(settings: dict[str, Any], s: _SettingDef) -> str:
         orientation = str(settings.get("orientation", "?"))
         inverted = str(settings.get("inverted_image", "?")).lower()
         return f"{orientation} (inverted_image: {inverted})"
+    if s.kind == "fit_mode":
+        raw = str(settings.get("image_fit_mode", "fill"))
+        return _FIT_MODE_LABELS.get(raw, raw)
     if s.subkey:
         return str(settings.get(s.key, {}).get(s.subkey, "?"))
     return str(settings.get(s.key, "?"))
 
 
 def _format_settings_list(settings: dict[str, Any]) -> str:
-    lines = ["Aktuelle InkyPi-Einstellungen:", ""]
+    lines = ["Aktuelle Einstellungen:", ""]
     for i, s in enumerate(_SETTINGS, 1):
         lines.append(f"{i}. {s.label}: {_get_current_value(settings, s)}")
     lines.append("")
@@ -79,6 +96,8 @@ async def settings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.exception("Failed to read device settings")
         await update.effective_message.reply_text(f"Fehler beim Lesen der Einstellungen: {exc}")
         return ConversationHandler.END
+    # Inject database-stored settings for display
+    device_settings["image_fit_mode"] = services.database.get_setting("image_fit_mode") or "fill"
     await update.effective_message.reply_text(_format_settings_list(device_settings))
     return WAITING_FOR_SETTINGS_CHOICE
 
@@ -104,11 +123,23 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
     context.user_data[PENDING_SETTINGS_KEY] = choice - 1
 
     services = get_services(context)
-    current = _get_current_value(services.display.read_device_settings(), s)
+    if s.kind == "fit_mode":
+        current_raw = services.database.get_setting("image_fit_mode") or "fill"
+        current = _FIT_MODE_LABELS.get(current_raw, current_raw)
+    else:
+        current = _get_current_value(services.display.read_device_settings(), s)
+
     if s.kind == "orientation":
         await update.effective_message.reply_text(
             f"Aktueller Wert für {s.label}: {current}\n"
             "Gib den neuen Wert ein: horizontal oder vertical."
+        )
+    elif s.kind == "fit_mode":
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current}\n\n"
+            "Zuschneiden — Bild wird auf den Rahmen zugeschnitten (Ränder werden ggf. abgeschnitten)\n"
+            "Einpassen — Bild wird vollständig angezeigt (unscharfer Hintergrund füllt die Ränder)\n\n"
+            "Gib den neuen Wert ein: Zuschneiden oder Einpassen."
         )
     else:
         await update.effective_message.reply_text(
@@ -142,6 +173,19 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
             "inverted_image": orientation == "vertical",
         }
         requested_value: str | float = orientation
+    elif s.kind == "fit_mode":
+        normalized = " ".join(text.split())
+        fit_mode = _FIT_MODE_MAP.get(normalized)
+        if fit_mode is None:
+            await update.effective_message.reply_text(
+                "Ungültiger Wert. Bitte gib Zuschneiden oder Einpassen ein, oder nutze /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        services.database.set_setting("image_fit_mode", fit_mode)
+        label = _FIT_MODE_LABELS.get(fit_mode, fit_mode)
+        await update.effective_message.reply_text(f"{s.label} ist jetzt {label}.")
+        return ConversationHandler.END
     else:
         try:
             value = float(text.replace(",", "."))

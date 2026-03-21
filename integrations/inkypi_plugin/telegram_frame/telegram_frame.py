@@ -80,6 +80,7 @@ class TelegramFrame(BasePlugin):
                 font_path=str(payload.get("font_path") or ""),
                 caption_text_color=str(payload.get("caption_text_color") or DEFAULT_CAPTION_TEXT_COLOR),
                 caption_background_color=str(payload.get("caption_background_color") or DEFAULT_CAPTION_BACKGROUND_COLOR),
+                fit_mode=str(payload.get("image_fit_mode") or "fill"),
             )
 
         return final_image
@@ -102,26 +103,36 @@ class TelegramFrame(BasePlugin):
         font_path: str,
         caption_text_color: str,
         caption_background_color: str,
+        fit_mode: str = "fill",
     ) -> Image.Image:
         final_image = Image.new("RGB", (width, height), ImageColor.getrgb(caption_background_color))
         photo_area_size = (width, photo_height)
 
-        blurred_background = ImageOps.fit(
-            prepared_image,
-            photo_area_size,
-            method=Image.Resampling.LANCZOS,
-            centering=(0.5, 0.5),
-        ).filter(ImageFilter.GaussianBlur(radius=18))
-        final_image.paste(blurred_background, (0, 0))
+        if fit_mode == "fill":
+            filled = ImageOps.fit(
+                prepared_image,
+                photo_area_size,
+                method=Image.Resampling.LANCZOS,
+                centering=(0.5, 0.5),
+            )
+            final_image.paste(filled, (0, 0))
+        else:
+            blurred_background = ImageOps.fit(
+                prepared_image,
+                photo_area_size,
+                method=Image.Resampling.LANCZOS,
+                centering=(0.5, 0.5),
+            ).filter(ImageFilter.GaussianBlur(radius=18))
+            final_image.paste(blurred_background, (0, 0))
 
-        contained = ImageOps.contain(
-            prepared_image,
-            photo_area_size,
-            method=Image.Resampling.LANCZOS,
-        )
-        paste_x = (width - contained.width) // 2
-        paste_y = (photo_height - contained.height) // 2
-        final_image.paste(contained, (paste_x, paste_y))
+            contained = ImageOps.contain(
+                prepared_image,
+                photo_area_size,
+                method=Image.Resampling.LANCZOS,
+            )
+            paste_x = (width - contained.width) // 2
+            paste_y = (photo_height - contained.height) // 2
+            final_image.paste(contained, (paste_x, paste_y))
 
         draw = ImageDraw.Draw(final_image)
         bar_top = photo_height

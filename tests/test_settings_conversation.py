@@ -41,6 +41,7 @@ class SettingsConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3. Schärfe", reply)
         self.assertIn("4. Helligkeit", reply)
         self.assertIn("5. Ausrichtung", reply)
+        self.assertIn("6. Bildanpassung", reply)
 
     async def test_receive_settings_value_applies_and_confirms_value(self) -> None:
         services = _FakeServices(is_admin=True)
@@ -166,10 +167,22 @@ class _FakeDisplay:
         return self.apply_result
 
 
+class _FakeDatabase:
+    def __init__(self) -> None:
+        self._settings: dict[str, str] = {}
+
+    def get_setting(self, key: str) -> str | None:
+        return self._settings.get(key)
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._settings[key] = value
+
+
 class _FakeServices:
     def __init__(self, *, is_admin: bool):
         self.auth = _FakeAuth(is_admin=is_admin)
         self.display = _FakeDisplay()
+        self.database = _FakeDatabase()
 
 
 class _FakeMessage:

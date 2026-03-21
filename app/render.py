@@ -53,6 +53,7 @@ class RenderService:
         taken_at: str,
         caption: str,
         orientation: str = "horizontal",
+        fit_mode: str = "fill",
     ) -> BytesIO:
         width = self.config.width
         height = self.config.height
@@ -69,13 +70,18 @@ class RenderService:
         final = Image.new("RGB", (width, height), bg_color)
         photo_area = (width, photo_height)
 
-        blurred = ImageOps.fit(
-            prepared, photo_area, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5),
-        ).filter(ImageFilter.GaussianBlur(radius=_BLUR_RADIUS))
-        final.paste(blurred, (0, 0))
-
-        contained = ImageOps.contain(prepared, photo_area, method=Image.Resampling.LANCZOS)
-        final.paste(contained, ((width - contained.width) // 2, (photo_height - contained.height) // 2))
+        if fit_mode == "fill":
+            filled = ImageOps.fit(
+                prepared, photo_area, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5),
+            )
+            final.paste(filled, (0, 0))
+        else:
+            blurred = ImageOps.fit(
+                prepared, photo_area, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5),
+            ).filter(ImageFilter.GaussianBlur(radius=_BLUR_RADIUS))
+            final.paste(blurred, (0, 0))
+            contained = ImageOps.contain(prepared, photo_area, method=Image.Resampling.LANCZOS)
+            final.paste(contained, ((width - contained.width) // 2, (photo_height - contained.height) // 2))
 
         draw = ImageDraw.Draw(final)
         bar_top = photo_height

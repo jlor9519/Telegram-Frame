@@ -121,6 +121,7 @@ class DisplayRequest:
     created_at: str
     uploaded_by: int
     show_caption: bool = True
+    fit_mode: str = "fill"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -132,6 +133,7 @@ class DisplayRequest:
             "caption": self.caption,
             "created_at": self.created_at,
             "uploaded_by": self.uploaded_by,
+            "image_fit_mode": self.fit_mode,
         }
 
 
