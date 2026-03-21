@@ -13,8 +13,6 @@ from urllib import error, parse, request
 
 logger = logging.getLogger(__name__)
 
-from PIL import Image
-
 from app.inkypi_paths import resolve_inkypi_layout
 from app.models import (
     DeviceSettingsApplyResult,
@@ -29,6 +27,7 @@ from app.models import (
 INKYPI_SERVICE_NAME = "inkypi.service"
 INKYPI_RESTART_TIMEOUT_SECONDS = 45
 INKYPI_HTTP_READY_TIMEOUT_SECONDS = 30
+DEFAULT_TELEGRAM_FRAME_INSTANCE_NAME = "Telegram Frame"
 
 
 def _write_device_json(path: Path, updates: dict[str, object]) -> None:
@@ -207,10 +206,9 @@ class InkyPiAdapter:
         if payload is None:
             return DisplayResult(False, f"InkyPi payload does not exist: {payload_path}")
 
-        orientation_hint = str(payload.get("orientation_hint", "horizontal")).strip() or "horizontal"
-        orientation_result = self._patch_device_orientation(orientation_hint)
-        if orientation_result is not None:
-            return orientation_result
+        plugin_sync_result = self._sync_active_plugin_instance(payload_path)
+        if plugin_sync_result is not None:
+            return plugin_sync_result
 
         if self.config.update_method == "http_update_now":
             logger.info("Triggering display via HTTP POST to %s", self.config.update_now_url)
@@ -289,7 +287,7 @@ class InkyPiAdapter:
     def _write_bridge_payload(self, request: DisplayRequest) -> Path:
         self.storage.inkypi_payload_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(request.composed_path, self.storage.current_image_path)
-        orientation_hint = self._detect_orientation_hint(self.storage.current_image_path)
+        orientation_hint = self._current_orientation_setting()
 
         payload = request.to_payload()
         payload["prepared_image_path"] = str(self.storage.current_image_path)
@@ -330,21 +328,103 @@ class InkyPiAdapter:
             return None
         return json.loads(payload_path.read_text(encoding="utf-8"))
 
-    def _detect_orientation_hint(self, image_path: Path) -> str:
-        with Image.open(image_path) as image:
-            return "vertical" if image.height > image.width else "horizontal"
-
     def _device_config_path(self) -> Path:
         return self.layout.device_config_path.resolve(strict=False)
 
-    def _patch_device_orientation(self, orientation_hint: str) -> DisplayResult | None:
+    def _current_orientation_setting(self) -> str:
+        try:
+            settings = self.read_device_settings()
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read current InkyPi orientation, defaulting to horizontal: %s", exc)
+            return "horizontal"
+
+        orientation = str(settings.get("orientation") or "horizontal").strip().lower()
+        if orientation not in {"horizontal", "vertical"}:
+            return "horizontal"
+        return orientation
+
+    def _sync_active_plugin_instance(self, payload_path: Path) -> DisplayResult | None:
         device_config_path = self._device_config_path()
         try:
             data = json.loads(device_config_path.read_text(encoding="utf-8")) if device_config_path.exists() else {}
-            if data.get("orientation") == orientation_hint:
-                return None
+        except PermissionError as exc:
+            logger.warning("Permission denied reading device config for plugin sync: %s", exc)
+            return DisplayResult(False, f"Failed to read InkyPi device config: {exc}")
+        except OSError as exc:
+            logger.warning("OS error reading device config for plugin sync: %s", exc)
+            return DisplayResult(False, f"Failed to read InkyPi device config: {exc}")
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON in device config during plugin sync: %s", exc)
+            return DisplayResult(False, f"InkyPi device config is invalid JSON: {exc}")
 
-            data["orientation"] = orientation_hint
+        playlist_config = data.get("playlist_config")
+        if not isinstance(playlist_config, dict):
+            return None
+
+        playlists = playlist_config.get("playlists")
+        if not isinstance(playlists, list):
+            return None
+
+        target_playlist: dict[str, object] | None = None
+        target_instance: dict[str, object] | None = None
+        target_index: int | None = None
+
+        for playlist in playlists:
+            if not isinstance(playlist, dict):
+                continue
+            plugins = playlist.get("plugins")
+            if not isinstance(plugins, list):
+                continue
+
+            named_match: tuple[dict[str, object], int] | None = None
+            fallback_match: tuple[dict[str, object], int] | None = None
+            for index, plugin in enumerate(plugins):
+                if not isinstance(plugin, dict):
+                    continue
+                if plugin.get("plugin_id") != self.config.plugin_id:
+                    continue
+                if fallback_match is None:
+                    fallback_match = (plugin, index)
+                if plugin.get("name") == DEFAULT_TELEGRAM_FRAME_INSTANCE_NAME:
+                    named_match = (plugin, index)
+                    break
+
+            match = named_match or fallback_match
+            if match is not None:
+                target_playlist = playlist
+                target_instance, target_index = match
+                break
+
+        if target_playlist is None or target_instance is None or target_index is None:
+            logger.debug("No matching %s plugin instance found in playlist_config; skipping plugin sync.", self.config.plugin_id)
+            return None
+
+        changed = False
+        payload_text = str(payload_path.resolve(strict=False))
+
+        plugin_settings = target_instance.get("plugin_settings")
+        if not isinstance(plugin_settings, dict):
+            plugin_settings = {}
+            target_instance["plugin_settings"] = plugin_settings
+            changed = True
+        if plugin_settings.get("payload_path") != payload_text:
+            plugin_settings["payload_path"] = payload_text
+            changed = True
+
+        if target_playlist.get("current_plugin_index") != target_index:
+            target_playlist["current_plugin_index"] = target_index
+            changed = True
+
+        playlist_name = target_playlist.get("name")
+        if isinstance(playlist_name, str) and playlist_name:
+            if playlist_config.get("active_playlist") != playlist_name:
+                playlist_config["active_playlist"] = playlist_name
+                changed = True
+
+        if not changed:
+            return None
+
+        try:
             device_config_path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 "w",
@@ -358,14 +438,11 @@ class InkyPiAdapter:
             temp_path.replace(device_config_path)
             return None
         except PermissionError as exc:
-            logger.warning("Permission denied patching device orientation: %s", exc)
-            return DisplayResult(False, f"Failed to update InkyPi orientation setting: {exc}")
+            logger.warning("Permission denied syncing Telegram Frame plugin instance: %s", exc)
+            return DisplayResult(False, f"Failed to update InkyPi plugin settings: {exc}")
         except OSError as exc:
-            logger.warning("OS error patching device config: %s", exc)
-            return DisplayResult(False, f"Failed to update InkyPi device config: {exc}")
-        except json.JSONDecodeError as exc:
-            logger.warning("Invalid JSON in device config: %s", exc)
-            return DisplayResult(False, f"InkyPi device config is invalid JSON: {exc}")
+            logger.warning("OS error syncing Telegram Frame plugin instance: %s", exc)
+            return DisplayResult(False, f"Failed to update InkyPi plugin settings: {exc}")
 
     def _format_refresh_command(self, payload_path: Path, image_path: Path) -> list[str]:
         command = self.config.refresh_command.format(

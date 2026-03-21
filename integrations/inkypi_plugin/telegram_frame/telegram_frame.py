@@ -53,7 +53,7 @@ class TelegramFrame(BasePlugin):
         if not image_path.exists():
             raise RuntimeError(f"Prepared image not found: {image_path}")
 
-        orientation = str(payload.get("orientation_hint") or device_config.get_config("orientation") or "horizontal")
+        orientation = str(device_config.get_config("orientation") or "horizontal")
         width, height = self._resolve_dimensions(device_config, orientation)
         caption_bar_height = self._safe_int(payload.get("caption_bar_height"), DEFAULT_CAPTION_BAR_HEIGHT)
         caption_bar_height = max(0, min(caption_bar_height, height - 1))

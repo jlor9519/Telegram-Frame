@@ -125,7 +125,6 @@ class InkyPiSetupTests(unittest.TestCase):
                 json.dumps(
                     {
                         "prepared_image_path": str(image_path),
-                        "orientation_hint": "horizontal",
                         "caption": "A very long caption that should still end up in a tiny white bar.",
                         "taken_at": "2026-03-18",
                         "location": "Berlin, Germany",
@@ -170,7 +169,6 @@ class InkyPiSetupTests(unittest.TestCase):
                 json.dumps(
                     {
                         "prepared_image_path": str(image_path),
-                        "orientation_hint": "vertical",
                         "caption": "Portrait test",
                         "taken_at": "2026-03-18",
                         "location": "Berlin",
@@ -199,6 +197,38 @@ class InkyPiSetupTests(unittest.TestCase):
             self.assertEqual(generated.getpixel((478, 790)), (255, 255, 255))
             self.assertGreater(self._count_nonwhite_pixels(generated, (12, 758, 170, 798)), 0)
             self.assertGreater(self._count_nonwhite_pixels(generated, (300, 758, 468, 798)), 0)
+
+    def test_plugin_uses_device_orientation_even_if_payload_hint_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_root = tmpdir_path / "src"
+            self._prepare_plugin_import_tree(source_root)
+
+            image_path = tmpdir_path / "prepared.png"
+            payload_path = tmpdir_path / "payload.json"
+            from PIL import Image
+
+            Image.new("RGB", (600, 1600), (70, 120, 210)).save(image_path)
+            payload_path.write_text(
+                json.dumps(
+                    {
+                        "prepared_image_path": str(image_path),
+                        "orientation_hint": "vertical",
+                        "caption": "Should still render horizontal",
+                        "caption_bar_height": 44,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            plugin_class = self._import_plugin_class(source_root)
+            plugin = plugin_class()
+            generated = plugin.generate_image(
+                {"payload_path": str(payload_path)},
+                _FakeDeviceConfig("horizontal", (800, 480)),
+            )
+
+            self.assertEqual(generated.size, (800, 480))
 
     def _prepare_plugin_import_tree(self, source_root: Path) -> None:
         plugin_root = source_root / "plugins"

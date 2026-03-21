@@ -39,7 +39,7 @@ class _FakeCompletedProcess:
 
 
 class InkyPiAdapterTests(unittest.TestCase):
-    def test_display_writes_payload_and_switches_orientation_for_portrait(self) -> None:
+    def test_display_writes_payload_without_overriding_selected_orientation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             source_image = tmpdir_path / "prepared.png"
@@ -61,7 +61,7 @@ class InkyPiAdapterTests(unittest.TestCase):
 
             self.assertTrue(result.success)
             payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["orientation_hint"], "vertical")
+            self.assertEqual(payload["orientation_hint"], "horizontal")
             self.assertEqual(payload["prepared_image_path"], str(storage_config.current_image_path))
             self.assertEqual(payload["caption_bar_height"], 44)
             self.assertEqual(payload["caption_character_limit"], 72)
@@ -69,7 +69,7 @@ class InkyPiAdapterTests(unittest.TestCase):
             self.assertEqual(payload["metadata_font_size"], 14)
 
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
-            self.assertEqual(device_config["orientation"], "vertical")
+            self.assertEqual(device_config["orientation"], "horizontal")
 
     def test_display_sets_caption_bar_height_zero_when_show_caption_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -106,7 +106,7 @@ class InkyPiAdapterTests(unittest.TestCase):
             payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["caption_bar_height"], 0)
 
-    def test_display_defaults_square_image_to_horizontal(self) -> None:
+    def test_display_keeps_vertical_orientation_for_square_image_when_selected(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             source_image = tmpdir_path / "prepared.png"
@@ -128,10 +128,10 @@ class InkyPiAdapterTests(unittest.TestCase):
 
             self.assertTrue(result.success)
             payload = json.loads(storage_config.current_payload_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["orientation_hint"], "horizontal")
+            self.assertEqual(payload["orientation_hint"], "vertical")
 
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
-            self.assertEqual(device_config["orientation"], "horizontal")
+            self.assertEqual(device_config["orientation"], "vertical")
 
     def test_display_reports_http_json_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -185,7 +185,7 @@ class InkyPiAdapterTests(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertIn("refresh ok", result.message)
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
-            self.assertEqual(device_config["orientation"], "horizontal")
+            self.assertEqual(device_config["orientation"], "vertical")
 
     def test_apply_device_settings_saves_reloads_and_refreshes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -306,6 +306,44 @@ class InkyPiAdapterTests(unittest.TestCase):
             self.assertTrue(result.refresh_skipped)
             self.assertIn("kein aktuelles Bild", result.message)
 
+    def test_apply_device_settings_can_update_orientation_and_inverted_image(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="vertical",
+                inverted_image=True,
+                image_settings={"saturation": 1.4},
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch(
+                "app.inkypi_adapter.subprocess.run",
+                side_effect=[
+                    _FakeCompletedProcess(returncode=0),
+                    _FakeCompletedProcess(returncode=0, stdout="active\n"),
+                ],
+            ):
+                result = adapter.apply_device_settings(
+                    {"orientation": "horizontal", "inverted_image": False},
+                    refresh_current=False,
+                )
+
+            self.assertTrue(result.success)
+            self.assertEqual(result.confirmed_settings["orientation"], "horizontal")
+            self.assertFalse(result.confirmed_settings["inverted_image"])
+            device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
+            self.assertEqual(device_config["orientation"], "horizontal")
+            self.assertFalse(device_config["inverted_image"])
+
     def test_apply_device_settings_reports_restart_failure_but_keeps_saved_value(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -365,9 +403,88 @@ class InkyPiAdapterTests(unittest.TestCase):
 
             self.assertTrue(result.success)
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
-            self.assertEqual(device_config["orientation"], "horizontal")
+            self.assertEqual(device_config["orientation"], "vertical")
             self.assertEqual(device_config["image_settings"]["saturation"], 1.7)
             self.assertEqual(device_config["image_settings"]["contrast"], 1.3)
+
+    def test_refresh_only_pins_telegram_frame_plugin_instance_and_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="vertical",
+                image_settings={"saturation": 1.7},
+            )
+            device_config_path = tmpdir_path / "InkyPi" / "src" / "config" / "device.json"
+            device_config = json.loads(device_config_path.read_text(encoding="utf-8"))
+            device_config["playlist_config"] = {
+                "active_playlist": "Other",
+                "playlists": [
+                    {
+                        "name": "Default",
+                        "start_time": "00:00",
+                        "end_time": "24:00",
+                        "current_plugin_index": 0,
+                        "plugins": [
+                            {
+                                "plugin_id": "weather",
+                                "name": "Weather",
+                                "plugin_settings": {},
+                                "refresh": {"interval": 600},
+                            },
+                            {
+                                "plugin_id": "telegram_frame",
+                                "name": "Telegram Frame",
+                                "plugin_settings": {"payload_path": "/tmp/old.json"},
+                                "refresh": {"interval": 86400},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "Other",
+                        "start_time": "00:00",
+                        "end_time": "24:00",
+                        "current_plugin_index": 0,
+                        "plugins": [
+                            {
+                                "plugin_id": "image_folder",
+                                "name": "Folder",
+                                "plugin_settings": {},
+                                "refresh": {"interval": 600},
+                            }
+                        ],
+                    },
+                ],
+            }
+            device_config_path.write_text(json.dumps(device_config), encoding="utf-8")
+            storage_config.current_payload_path.parent.mkdir(parents=True, exist_ok=True)
+            storage_config.current_payload_path.write_text(
+                json.dumps({"orientation_hint": "vertical"}),
+                encoding="utf-8",
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch("app.inkypi_adapter.request.urlopen", return_value=_FakeHttpResponse('{"message":"ok"}')):
+                result = adapter.refresh_only()
+
+            self.assertTrue(result.success)
+            updated = json.loads(device_config_path.read_text(encoding="utf-8"))
+            default_playlist = updated["playlist_config"]["playlists"][0]
+            telegram_instance = default_playlist["plugins"][1]
+            self.assertEqual(updated["playlist_config"]["active_playlist"], "Default")
+            self.assertEqual(default_playlist["current_plugin_index"], 1)
+            self.assertEqual(
+                telegram_instance["plugin_settings"]["payload_path"],
+                str(storage_config.current_payload_path.resolve(strict=False)),
+            )
 
     @staticmethod
     def _build_storage(tmpdir_path: Path) -> StorageConfig:
@@ -437,11 +554,14 @@ class InkyPiAdapterTests(unittest.TestCase):
         tmpdir_path: Path,
         *,
         orientation: str,
+        inverted_image: bool | None = None,
         image_settings: dict[str, float] | None = None,
     ) -> None:
         device_config_path = tmpdir_path / "InkyPi" / "src" / "config" / "device.json"
         device_config_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"orientation": orientation}
+        if inverted_image is not None:
+            payload["inverted_image"] = inverted_image
         if image_settings is not None:
             payload["image_settings"] = image_settings
         device_config_path.write_text(json.dumps(payload), encoding="utf-8")

@@ -26,7 +26,7 @@ class SettingsConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(update.effective_message.replies, ["Dieser Befehl ist nur für Admins verfügbar."])
 
-    async def test_settings_entry_shows_only_persistent_image_tuning_options(self) -> None:
+    async def test_settings_entry_shows_image_tuning_and_orientation_options(self) -> None:
         services = _FakeServices(is_admin=True)
         update = _FakeUpdate("/settings", user_id=11)
         context = _FakeContext(services)
@@ -40,7 +40,7 @@ class SettingsConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2. Kontrast", reply)
         self.assertIn("3. Schärfe", reply)
         self.assertIn("4. Helligkeit", reply)
-        self.assertNotIn("Ausrichtung", reply)
+        self.assertIn("5. Ausrichtung", reply)
 
     async def test_receive_settings_value_applies_and_confirms_value(self) -> None:
         services = _FakeServices(is_admin=True)
@@ -84,6 +84,36 @@ class SettingsConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Ungültiger Wert", update.effective_message.replies[0])
         self.assertIsNone(services.display.last_updates)
 
+    async def test_receive_settings_value_applies_orientation_and_inverted_image(self) -> None:
+        services = _FakeServices(is_admin=True)
+        services.display.apply_result = DeviceSettingsApplyResult(
+            success=True,
+            message="Einstellungen wurden gespeichert, InkyPi wurde neu geladen und die Anzeige aktualisiert.",
+            confirmed_settings={
+                "orientation": "vertical",
+                "inverted_image": True,
+                "image_settings": services.display.settings["image_settings"],
+            },
+            device_config_path=services.display.device_config_path,
+            saved=True,
+            reloaded=True,
+            refreshed=True,
+        )
+        update = _FakeUpdate("vertical", user_id=11)
+        context = _FakeContext(services)
+        context.user_data[PENDING_SETTINGS_KEY] = 4
+
+        result = await receive_settings_value(update, context)
+
+        self.assertEqual(result, ConversationHandler.END)
+        self.assertEqual(
+            services.display.last_updates,
+            {"orientation": "vertical", "inverted_image": True},
+        )
+        reply = update.effective_message.replies[0]
+        self.assertIn("Ausrichtung ist jetzt vertical", reply)
+        self.assertIn("inverted_image: true", reply)
+
 
 class _FakeAuth:
     def __init__(self, *, is_admin: bool):
@@ -101,6 +131,8 @@ class _FakeDisplay:
     def __init__(self) -> None:
         self.device_config_path = "/tmp/device.json"
         self.settings = {
+            "orientation": "vertical",
+            "inverted_image": True,
             "image_settings": {
                 "saturation": 1.4,
                 "contrast": 1.4,

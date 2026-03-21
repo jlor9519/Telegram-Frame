@@ -21,7 +21,7 @@ class _SettingDef:
     label: str
     key: str               # top-level key in device.json
     subkey: str | None     # key inside image_settings, or None
-    kind: str              # "float"
+    kind: str              # "float" | "orientation"
 
 
 _SETTINGS: list[_SettingDef] = [
@@ -29,10 +29,15 @@ _SETTINGS: list[_SettingDef] = [
     _SettingDef("Kontrast",     "image_settings", "contrast",   "float"),
     _SettingDef("Schärfe",      "image_settings", "sharpness",  "float"),
     _SettingDef("Helligkeit",   "image_settings", "brightness", "float"),
+    _SettingDef("Ausrichtung",  "orientation",    None,         "orientation"),
 ]
 
 
 def _get_current_value(settings: dict[str, Any], s: _SettingDef) -> str:
+    if s.kind == "orientation":
+        orientation = str(settings.get("orientation", "?"))
+        inverted = str(settings.get("inverted_image", "?")).lower()
+        return f"{orientation} (inverted_image: {inverted})"
     if s.subkey:
         return str(settings.get(s.key, {}).get(s.subkey, "?"))
     return str(settings.get(s.key, "?"))
@@ -45,6 +50,22 @@ def _format_settings_list(settings: dict[str, Any]) -> str:
     lines.append("")
     lines.append("Welche Einstellung möchtest du ändern? Antworte mit der Nummer oder /cancel.")
     return "\n".join(lines)
+
+
+def _normalize_orientation_value(text: str) -> str | None:
+    normalized = " ".join(text.strip().lower().split())
+    mapping = {
+        "horizontal": "horizontal",
+        "landscape": "horizontal",
+        "waagerecht": "horizontal",
+        "querformat": "horizontal",
+        "vertical": "vertical",
+        "vertikal": "vertical",
+        "hochformat": "vertical",
+        "portrait": "vertical",
+        "porträt": "vertical",
+    }
+    return mapping.get(normalized)
 
 
 @require_admin
@@ -84,10 +105,16 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
 
     services = get_services(context)
     current = _get_current_value(services.display.read_device_settings(), s)
-    await update.effective_message.reply_text(
-        f"Aktueller Wert für {s.label}: {current}\n"
-        "Gib den neuen Wert ein (z.B. 1.0, 1.4, 2.0):"
-    )
+    if s.kind == "orientation":
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current}\n"
+            "Gib den neuen Wert ein: horizontal oder vertical."
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current}\n"
+            "Gib den neuen Wert ein (z.B. 1.0, 1.4, 2.0):"
+        )
     return WAITING_FOR_SETTINGS_VALUE
 
 
@@ -102,22 +129,37 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
     text = (update.effective_message.text or "").strip().lower()
     services = get_services(context)
 
-    try:
-        value = float(text.replace(",", "."))
-    except ValueError:
-        await update.effective_message.reply_text(
-            "Ungültiger Wert. Bitte gib eine Zahl ein (z.B. 1.0), oder nutze /cancel."
-        )
-        context.user_data[PENDING_SETTINGS_KEY] = idx
-        return WAITING_FOR_SETTINGS_VALUE
-    if value < 0.1 or value > 3.0:
-        await update.effective_message.reply_text(
-            "Der Wert muss zwischen 0.1 und 3.0 liegen. Bitte erneut eingeben oder /cancel."
-        )
-        context.user_data[PENDING_SETTINGS_KEY] = idx
-        return WAITING_FOR_SETTINGS_VALUE
+    if s.kind == "orientation":
+        orientation = _normalize_orientation_value(text)
+        if orientation is None:
+            await update.effective_message.reply_text(
+                "Ungültiger Wert. Bitte gib horizontal oder vertical ein, oder nutze /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        updates = {
+            "orientation": orientation,
+            "inverted_image": orientation == "vertical",
+        }
+        requested_value: str | float = orientation
+    else:
+        try:
+            value = float(text.replace(",", "."))
+        except ValueError:
+            await update.effective_message.reply_text(
+                "Ungültiger Wert. Bitte gib eine Zahl ein (z.B. 1.0), oder nutze /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        if value < 0.1 or value > 3.0:
+            await update.effective_message.reply_text(
+                "Der Wert muss zwischen 0.1 und 3.0 liegen. Bitte erneut eingeben oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
 
-    updates = {"image_settings": {str(s.subkey): value}}
+        updates = {"image_settings": {str(s.subkey): value}}
+        requested_value = value
 
     try:
         result = services.display.apply_device_settings(updates, refresh_current=True)
@@ -126,7 +168,7 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
         await update.effective_message.reply_text(f"Fehler beim Speichern der Einstellungen: {exc}")
         return ConversationHandler.END
 
-    confirmed_value = _get_current_value(result.confirmed_settings, s) if result.confirmed_settings else str(value)
+    confirmed_value = _get_current_value(result.confirmed_settings, s) if result.confirmed_settings else str(requested_value)
     path_note = f" (device.json: {result.device_config_path})" if result.device_config_path else ""
     status_prefix = (
         f"{s.label} ist jetzt {confirmed_value}"
