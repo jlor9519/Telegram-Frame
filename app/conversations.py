@@ -35,7 +35,6 @@ PENDING_SUBMISSION_KEY = "pending_submission"
 
 def _location_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Standort senden", callback_data="photo_location_current")],
         [
             InlineKeyboardButton("Überspringen", callback_data="photo_skip_location"),
             InlineKeyboardButton("Abbrechen", callback_data="photo_cancel"),
@@ -124,7 +123,7 @@ async def receive_text_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = (update.effective_message.text or "").strip().lower()
     if text in ("ja", "j"):
         await update.effective_message.reply_text(
-            "Wo wurde dieses Foto aufgenommen?",
+            "Wo wurde dieses Foto aufgenommen?\n\nSchreibe den Ort in das Textfeld oder wähle eine Option.",
             reply_markup=_location_keyboard(),
         )
         return WAITING_FOR_LOCATION
@@ -140,25 +139,7 @@ async def receive_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
     pending["location"] = (update.effective_message.text or "").strip()
     await update.effective_message.reply_text(
-        "Wann wurde es aufgenommen? Zum Beispiel: 2026-03-15 oder Sommer 2025",
-        reply_markup=_date_keyboard(),
-    )
-    return WAITING_FOR_TAKEN_AT
-
-
-async def receive_location_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    pending = context.user_data.get(PENDING_SUBMISSION_KEY)
-    message = update.effective_message
-    if message is None or pending is None:
-        return ConversationHandler.END
-    loc = message.location
-    if loc is None:
-        return WAITING_FOR_LOCATION
-    lat_dir = "N" if loc.latitude >= 0 else "S"
-    lon_dir = "E" if loc.longitude >= 0 else "W"
-    pending["location"] = f"{abs(loc.latitude):.4f}°{lat_dir}, {abs(loc.longitude):.4f}°{lon_dir}"
-    await message.reply_text(
-        f"Standort: {pending['location']}\n\nWann wurde es aufgenommen?",
+        "Wann wurde es aufgenommen?\n\nSchreibe das Datum in das Textfeld (z.B. 2026-03-15 oder Sommer 2025) oder wähle eine Option.",
         reply_markup=_date_keyboard(),
     )
     return WAITING_FOR_TAKEN_AT
@@ -170,7 +151,7 @@ async def receive_taken_at(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
     pending["taken_at"] = (update.effective_message.text or "").strip()
     await update.effective_message.reply_text(
-        "Welche Bildunterschrift soll unter dem Foto angezeigt werden?",
+        "Welche Bildunterschrift soll unter dem Foto angezeigt werden?\n\nSchreibe den Text in das Textfeld oder wähle eine Option.",
         reply_markup=_caption_keyboard(),
     )
     return WAITING_FOR_CAPTION
@@ -235,8 +216,8 @@ async def photo_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data == "photo_text_yes":
         await query.edit_message_text("Möchtest du Text hinzufügen? Ja")
-        msg = await query.message.reply_text(
-            "Wo wurde dieses Foto aufgenommen?",
+        await query.message.reply_text(
+            "Wo wurde dieses Foto aufgenommen?\n\nSchreibe den Ort in das Textfeld oder wähle eine Option.",
             reply_markup=_location_keyboard(),
         )
         return WAITING_FOR_LOCATION
@@ -245,17 +226,11 @@ async def photo_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("Möchtest du Text hinzufügen? Nein")
         return await _submit_photo(update, context, show_caption=False)
 
-    if data == "photo_location_current":
-        await query.edit_message_text(
-            "Bitte teile deinen Standort über das Anhang-Menü (Büroklammer > Standort)."
-        )
-        return WAITING_FOR_LOCATION
-
     if data == "photo_skip_location":
         pending["location"] = ""
         await query.edit_message_text("Ort: übersprungen")
         await query.message.reply_text(
-            "Wann wurde es aufgenommen? Zum Beispiel: 2026-03-15 oder Sommer 2025",
+            "Wann wurde es aufgenommen?\n\nSchreibe das Datum in das Textfeld (z.B. 2026-03-15 oder Sommer 2025) oder wähle eine Option.",
             reply_markup=_date_keyboard(),
         )
         return WAITING_FOR_TAKEN_AT
@@ -264,7 +239,7 @@ async def photo_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pending["taken_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         await query.edit_message_text(f"Datum: {pending['taken_at']}")
         await query.message.reply_text(
-            "Welche Bildunterschrift soll unter dem Foto angezeigt werden?",
+            "Welche Bildunterschrift soll unter dem Foto angezeigt werden?\n\nSchreibe den Text in das Textfeld oder wähle eine Option.",
             reply_markup=_caption_keyboard(),
         )
         return WAITING_FOR_CAPTION
@@ -273,7 +248,7 @@ async def photo_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pending["taken_at"] = ""
         await query.edit_message_text("Datum: übersprungen")
         await query.message.reply_text(
-            "Welche Bildunterschrift soll unter dem Foto angezeigt werden?",
+            "Welche Bildunterschrift soll unter dem Foto angezeigt werden?\n\nSchreibe den Text in das Textfeld oder wähle eine Option.",
             reply_markup=_caption_keyboard(),
         )
         return WAITING_FOR_CAPTION
@@ -503,7 +478,6 @@ def build_photo_conversation() -> ConversationHandler:
             ],
             WAITING_FOR_LOCATION: [
                 CallbackQueryHandler(photo_button_callback, pattern=r"^photo_"),
-                MessageHandler(filters.LOCATION, receive_location_share),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_location),
                 MessageHandler(filters.ALL & ~filters.COMMAND, _unexpected_location),
             ],
