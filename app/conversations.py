@@ -194,8 +194,20 @@ async def _show_preview(message, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     original_path = Path(pending["original_path"])
     if original_path.exists():
-        with open(original_path, "rb") as photo:
-            await message.reply_photo(photo=photo, caption=preview_text, reply_markup=keyboard)
+        services = get_services(context)
+        try:
+            preview_buf = await asyncio.to_thread(
+                services.renderer.compose_preview,
+                original_path,
+                location=location,
+                taken_at=taken_at,
+                caption=caption,
+            )
+            await message.reply_photo(photo=preview_buf, caption=preview_text, reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to compose preview, falling back to original")
+            with open(original_path, "rb") as photo:
+                await message.reply_photo(photo=photo, caption=preview_text, reply_markup=keyboard)
     else:
         await message.reply_text(preview_text, reply_markup=keyboard)
     return WAITING_FOR_PREVIEW_CONFIRM
