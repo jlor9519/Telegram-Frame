@@ -28,6 +28,7 @@ from app.models import (
 
 INKYPI_SERVICE_NAME = "inkypi.service"
 INKYPI_RESTART_TIMEOUT_SECONDS = 45
+INKYPI_HTTP_READY_TIMEOUT_SECONDS = 30
 
 
 def _write_device_json(path: Path, updates: dict[str, object]) -> None:
@@ -154,6 +155,20 @@ class InkyPiAdapter:
                 saved=True,
                 reloaded=True,
                 refresh_skipped=True,
+            )
+
+        http_ready_error = self._wait_for_inkypi_http_ready()
+        if http_ready_error is not None:
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=(
+                    "Einstellungen wurden gespeichert und InkyPi wurde neu geladen, "
+                    f"aber der InkyPi-Webserver war noch nicht erreichbar: {http_ready_error}"
+                ),
+                confirmed_settings=confirmed,
+                device_config_path=device_config_path,
+                saved=True,
+                reloaded=True,
             )
 
         refresh_result = self._trigger_display_update(self.storage.current_payload_path)
@@ -422,3 +437,27 @@ class InkyPiAdapter:
             time.sleep(1)
 
         return last_status
+
+    def _wait_for_inkypi_http_ready(self) -> str | None:
+        if self.config.update_method != "http_update_now":
+            return None
+
+        update_parts = parse.urlsplit(self.config.update_now_url)
+        probe_url = parse.urlunsplit((update_parts.scheme, update_parts.netloc, "/", "", ""))
+        deadline = time.monotonic() + INKYPI_HTTP_READY_TIMEOUT_SECONDS
+        last_error = f"InkyPi war unter {probe_url} nicht erreichbar."
+
+        while time.monotonic() < deadline:
+            try:
+                with request.urlopen(probe_url, timeout=5) as response:
+                    response.read(1)
+                    return None
+            except error.HTTPError:
+                return None
+            except error.URLError as exc:
+                last_error = str(exc.reason)
+            except Exception as exc:  # pragma: no cover - defensive runtime guard
+                last_error = str(exc)
+            time.sleep(1)
+
+        return last_error

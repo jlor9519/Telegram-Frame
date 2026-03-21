@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from PIL import Image
 
@@ -25,8 +25,10 @@ class _FakeHttpResponse:
     def __exit__(self, exc_type, exc, tb) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            return self._body
+        return self._body[:size]
 
 
 class _FakeCompletedProcess:
@@ -225,6 +227,50 @@ class InkyPiAdapterTests(unittest.TestCase):
             device_config = json.loads((tmpdir_path / "InkyPi" / "src" / "config" / "device.json").read_text(encoding="utf-8"))
             self.assertEqual(device_config["image_settings"]["saturation"], 1.8)
             self.assertEqual(device_config["image_settings"]["contrast"], 1.4)
+
+    def test_apply_device_settings_waits_for_http_server_before_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            storage_config = self._build_storage(tmpdir_path)
+            display_config = self._build_display_config()
+            inkypi_config = self._build_config(
+                tmpdir_path,
+                update_method="http_update_now",
+                update_now_url="http://127.0.0.1/update_now",
+                refresh_command="sudo systemctl restart inkypi.service",
+            )
+            self._write_device_config(
+                tmpdir_path,
+                orientation="horizontal",
+                image_settings={"saturation": 1.2},
+            )
+            storage_config.current_payload_path.parent.mkdir(parents=True, exist_ok=True)
+            storage_config.current_payload_path.write_text(
+                json.dumps({"orientation_hint": "horizontal"}),
+                encoding="utf-8",
+            )
+            adapter = InkyPiAdapter(inkypi_config, storage_config, display_config)
+
+            with patch(
+                "app.inkypi_adapter.subprocess.run",
+                side_effect=[
+                    _FakeCompletedProcess(returncode=0),
+                    _FakeCompletedProcess(returncode=0, stdout="active\n"),
+                ],
+            ), patch(
+                "app.inkypi_adapter.request.urlopen",
+                side_effect=[
+                    URLError(ConnectionRefusedError(111, "Connection refused")),
+                    _FakeHttpResponse("ready"),
+                    _FakeHttpResponse('{"message":"ok"}'),
+                ],
+            ), patch("app.inkypi_adapter.time.sleep", return_value=None):
+                result = adapter.apply_device_settings({"image_settings": {"saturation": 1.5}})
+
+            self.assertTrue(result.success)
+            self.assertTrue(result.saved)
+            self.assertTrue(result.reloaded)
+            self.assertTrue(result.refreshed)
 
     def test_apply_device_settings_skips_refresh_without_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
