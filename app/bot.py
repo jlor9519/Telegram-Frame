@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
+import asyncio
+
+from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from app.commands import (
     cancel_command,
+    delete_cancel_callback,
     delete_command,
+    delete_confirm_callback,
     help_command,
     myid_command,
     next_command,
@@ -23,6 +27,7 @@ def build_application(services: AppServices) -> Application:
     application = ApplicationBuilder().token(services.config.telegram.bot_token).build()
     application.bot_data["services"] = services
     application.bot_data["processing_reservation"] = ProcessingReservation()
+    application.bot_data["display_lock"] = asyncio.Lock()
 
     application.add_handler(build_photo_conversation())
     application.add_handler(build_settings_conversation())
@@ -33,6 +38,8 @@ def build_application(services: AppServices) -> Application:
     application.add_handler(CommandHandler("next", next_command))
     application.add_handler(CommandHandler("prev", prev_command))
     application.add_handler(CommandHandler("delete", delete_command))
+    application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern=r"^delete_confirm:"))
+    application.add_handler(CallbackQueryHandler(delete_cancel_callback, pattern=r"^delete_cancel$"))
     application.add_handler(CommandHandler("refresh", refresh_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, stray_text_handler))
