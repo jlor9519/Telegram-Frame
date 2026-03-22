@@ -393,6 +393,65 @@ class InkyPiAdapter:
             )
         return self.apply_device_settings({}, refresh_current=True)
 
+    def get_sleep_schedule(self) -> tuple[str, str] | None:
+        """Return (sleep_start, wake_up) as 'HH:MM' strings, or None if quiet hours are off."""
+        try:
+            data = self.read_device_settings()
+        except (OSError, json.JSONDecodeError):
+            return None
+        playlist_config = data.get("playlist_config")
+        if not isinstance(playlist_config, dict):
+            return None
+        for playlist in playlist_config.get("playlists", []):
+            if not isinstance(playlist, dict):
+                continue
+            start = str(playlist.get("start_time", "00:00"))
+            end = str(playlist.get("end_time", "24:00"))
+            if start == "00:00" and end in ("24:00", "23:59"):
+                return None
+            # start_time = wake_up, end_time = sleep_start (device.json is "active" window)
+            return (end, start)
+        return None
+
+    def set_sleep_schedule(self, sleep_start: str | None, wake_up: str | None) -> DeviceSettingsApplyResult:
+        """Set or clear quiet hours. Pass None/None to disable."""
+        device_config_path = self._device_config_path()
+        if sleep_start is None or wake_up is None:
+            active_start, active_end = "00:00", "24:00"
+        else:
+            active_start, active_end = wake_up, sleep_start
+        try:
+            data = self.read_device_settings()
+            playlist_config = data.get("playlist_config")
+            if not isinstance(playlist_config, dict):
+                return DeviceSettingsApplyResult(
+                    success=False,
+                    message="playlist_config nicht in device.json gefunden. Bitte führe die Einrichtung erneut aus.",
+                    confirmed_settings={},
+                )
+            updated = False
+            for playlist in playlist_config.get("playlists", []):
+                if not isinstance(playlist, dict):
+                    continue
+                playlist["start_time"] = active_start
+                playlist["end_time"] = active_end
+                updated = True
+            if not updated:
+                return DeviceSettingsApplyResult(
+                    success=False,
+                    message="Keine Playlist in device.json gefunden. Bitte führe die Einrichtung erneut aus.",
+                    confirmed_settings={},
+                )
+            data["playlist_config"] = playlist_config
+            _write_device_json(device_config_path, data)
+        except Exception as exc:
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=f"Fehler beim Speichern: {exc}",
+                confirmed_settings={},
+            )
+        return self.apply_device_settings({}, refresh_current=True)
+
     def _read_plugin_refresh_interval(self, data: dict) -> int:
         playlist_config = data.get("playlist_config")
         if not isinstance(playlist_config, dict):

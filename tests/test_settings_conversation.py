@@ -159,6 +159,9 @@ class _FakeDisplay:
     def get_slideshow_interval(self) -> int:
         return 86400
 
+    def get_sleep_schedule(self) -> tuple[str, str] | None:
+        return None
+
     def apply_device_settings(
         self,
         updates: dict[str, object],

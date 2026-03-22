@@ -21,7 +21,7 @@ class _SettingDef:
     label: str
     key: str               # top-level key in device.json, or db setting key
     subkey: str | None     # key inside image_settings, or None
-    kind: str              # "float" | "orientation" | "fit_mode" | "integer"
+    kind: str              # "float" | "orientation" | "fit_mode" | "integer" | "interval" | "sleep_schedule"
 
 
 _SETTINGS: list[_SettingDef] = [
@@ -33,6 +33,7 @@ _SETTINGS: list[_SettingDef] = [
     _SettingDef("Bildanpassung",       "image_fit_mode",    None,         "fit_mode"),
     _SettingDef("Lokales Bildlimit",   "local_image_limit", None,         "integer"),
     _SettingDef("Anzeigedauer",        "slideshow_interval",None,         "interval"),
+    _SettingDef("Ruhezeit",            "sleep_schedule",    None,         "sleep_schedule"),
 ]
 
 _FIT_MODE_LABELS = {"fill": "Zuschneiden", "contain": "Einpassen"}
@@ -78,6 +79,23 @@ def _parse_interval_input(text: str) -> int | None:
     except ValueError:
         return None
 
+def _parse_time_string(s: str) -> str | None:
+    """Validate and normalize a time string to HH:MM. Returns None if invalid."""
+    s = s.strip()
+    if ":" in s:
+        parts = s.split(":", 1)
+    else:
+        parts = [s, "0"]
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except (ValueError, IndexError):
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
 _FIT_MODE_MAP = {
     "zuschneiden": "fill",
     "fill": "fill",
@@ -106,6 +124,11 @@ def _get_current_value(settings: dict[str, Any], s: _SettingDef) -> str:
             return _format_interval_label(int(raw))
         except (ValueError, TypeError):
             return "24 Stunden"
+    if s.kind == "sleep_schedule":
+        raw = settings.get("sleep_schedule")
+        if not raw:
+            return "Keine"
+        return str(raw)
     if s.subkey:
         return str(settings.get(s.key, {}).get(s.subkey, "?"))
     return str(settings.get(s.key, "?"))
@@ -151,6 +174,8 @@ async def settings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     device_settings["image_fit_mode"] = services.database.get_setting("image_fit_mode") or "fill"
     device_settings["local_image_limit"] = services.database.get_setting("local_image_limit") or "50"
     device_settings["slideshow_interval"] = services.display.get_slideshow_interval()
+    schedule = services.display.get_sleep_schedule()
+    device_settings["sleep_schedule"] = f"{schedule[0]}–{schedule[1]}" if schedule else ""
     await update.effective_message.reply_text(_format_settings_list(device_settings))
     return WAITING_FOR_SETTINGS_CHOICE
 
@@ -184,6 +209,9 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
     elif s.kind == "interval":
         raw_seconds = services.display.get_slideshow_interval()
         current = _format_interval_label(raw_seconds)
+    elif s.kind == "sleep_schedule":
+        sleep_sched = services.display.get_sleep_schedule()
+        current = f"{sleep_sched[0]}–{sleep_sched[1]}" if sleep_sched else "Keine"
     else:
         current = _get_current_value(services.display.read_device_settings(), s)
 
@@ -212,6 +240,13 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
             "Wie lange soll jedes Bild angezeigt werden?\n"
             "Beispiele: 30m, 1h, 2h, 6h, 1d\n"
             "(Minimum 5 Minuten, Maximum 7 Tage)"
+        )
+    elif s.kind == "sleep_schedule":
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current}\n\n"
+            "Gib die Ruhezeit im Format HH:MM-HH:MM ein (z.B. 22:00-08:00).\n"
+            "Das Display wechselt das Bild in dieser Zeit nicht.\n\n"
+            "Oder gib \"keine\" ein, um die Ruhezeit zu deaktivieren."
         )
     else:
         await update.effective_message.reply_text(
@@ -275,6 +310,52 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
             return WAITING_FOR_SETTINGS_VALUE
         services.database.set_setting(s.key, str(int_value))
         await update.effective_message.reply_text(f"{s.label} ist jetzt {int_value} Bilder.")
+        return ConversationHandler.END
+    elif s.kind == "sleep_schedule":
+        if text in ("keine", "kein", "no", "off", "deaktivieren"):
+            try:
+                result = services.display.set_sleep_schedule(None, None)
+            except Exception as exc:
+                logger.exception("Failed to disable sleep schedule")
+                await update.effective_message.reply_text(f"Fehler beim Speichern: {exc}")
+                return ConversationHandler.END
+            status = "Ruhezeit ist deaktiviert" if result.success else "Ruhezeit wurde deaktiviert"
+            await update.effective_message.reply_text(f"{status}.\n{result.message}")
+            return ConversationHandler.END
+        # Expect HH:MM-HH:MM (en-dash or hyphen)
+        raw = text.replace("–", "-").replace("—", "-")
+        parts = raw.split("-", 1)
+        if len(parts) != 2:
+            await update.effective_message.reply_text(
+                "Ungültiges Format. Bitte im Format HH:MM-HH:MM eingeben (z.B. 22:00-08:00), oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        sleep_start = _parse_time_string(parts[0])
+        wake_up = _parse_time_string(parts[1])
+        if sleep_start is None or wake_up is None:
+            await update.effective_message.reply_text(
+                "Ungültige Uhrzeit. Bitte im Format HH:MM-HH:MM eingeben (z.B. 22:00-08:00), oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        if sleep_start == wake_up:
+            await update.effective_message.reply_text(
+                "Schlaf- und Aufwachzeit dürfen nicht gleich sein. Bitte erneut eingeben oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        try:
+            result = services.display.set_sleep_schedule(sleep_start, wake_up)
+        except Exception as exc:
+            logger.exception("Failed to set sleep schedule")
+            await update.effective_message.reply_text(f"Fehler beim Speichern: {exc}")
+            return ConversationHandler.END
+        if result.success:
+            status = f"Ruhezeit ist jetzt {sleep_start}–{wake_up}. Das Display wechselt das Bild in dieser Zeit nicht"
+        else:
+            status = f"Ruhezeit wurde als {sleep_start}–{wake_up} gespeichert"
+        await update.effective_message.reply_text(f"{status}.\n{result.message}")
         return ConversationHandler.END
     elif s.kind == "interval":
         seconds = _parse_interval_input(text)
