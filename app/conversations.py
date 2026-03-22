@@ -424,6 +424,7 @@ async def _process_image(
         record.status = "display_failed"
         record.last_error = display_result.message
         return record, warnings
+    services.database.set_setting("current_image_displayed_at", utcnow_iso())
 
     if services.dropbox.enabled and services.config.dropbox.upload_rendered:
         try:

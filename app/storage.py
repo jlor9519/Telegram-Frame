@@ -29,6 +29,9 @@ class StorageService:
     def rendered_path(self, image_id: str, extension: str = ".png") -> Path:
         return self.config.rendered_dir / f"{image_id}{extension}"
 
+    def healthcheck(self) -> bool:
+        return all(p.exists() for p in (self.config.incoming_dir, self.config.rendered_dir))
+
     def cleanup_rendered_cache(self) -> None:
         keep = max(self.config.keep_recent_rendered, 0)
         rendered_files = sorted(

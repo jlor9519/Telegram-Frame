@@ -11,6 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.auth import require_admin, require_whitelist
+from app.database import utcnow_iso
 from app.models import AppServices, DisplayRequest, ProcessingReservation
 
 
@@ -52,32 +53,61 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+def _format_duration(since_iso: str | None) -> str:
+    if not since_iso:
+        return "unbekannt"
+    from datetime import datetime, timezone
+    try:
+        since = datetime.fromisoformat(since_iso)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - since
+        total_seconds = max(0, int(delta.total_seconds()))
+        minutes = total_seconds // 60
+        hours = minutes // 60
+        days = hours // 24
+        if days >= 1:
+            return f"seit {days} {'Tag' if days == 1 else 'Tagen'}"
+        if hours >= 1:
+            remaining_minutes = minutes % 60
+            if remaining_minutes:
+                return f"seit {hours} Std. {remaining_minutes} Min."
+            return f"seit {hours} {'Stunde' if hours == 1 else 'Stunden'}"
+        if minutes >= 1:
+            return f"seit {minutes} {'Minute' if minutes == 1 else 'Minuten'}"
+        return "seit weniger als einer Minute"
+    except (ValueError, TypeError):
+        return "unbekannt"
+
+
 @require_whitelist
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     services = get_services(context)
-    latest = services.database.get_latest_image()
-    reservation = get_reservation(context)
-    latest_summary = "noch keines"
-    if latest:
-        latest_summary = f"{latest.image_id} ({latest.status})"
 
-    active_owner = reservation.owner_user_id if reservation.owner_user_id is not None else "idle"
-    if services.config.inkypi.update_method == "http_update_now":
-        update_target = services.config.inkypi.update_now_url
-    else:
-        update_target = services.config.inkypi.refresh_command
+    db_ok = services.database.healthcheck()
+    storage_ok = services.storage.healthcheck()
+    payload_ok = services.display.payload_exists()
+
+    image_count = services.database.count_displayed_images()
+    displayed_at = services.database.get_setting("current_image_displayed_at")
+    user_count = services.database.count_whitelisted_users()
+
     await update.effective_message.reply_text(
         "\n".join(
             [
                 "Fotorahmen-Status",
-                f"- Datenbank: {'ok' if services.database.healthcheck() else 'Fehler'}",
-                f"- Freigegebene Nutzer: {services.database.count_whitelisted_users()}",
-                f"- Dropbox: {services.dropbox.health_summary()}",
-                f"- Letztes Bild: {latest_summary}",
-                f"- Aktive Reservierung: {active_owner}",
-                f"- Payload-Datei: {services.config.storage.current_payload_path}",
-                f"- InkyPi-Updatemethode: {services.config.inkypi.update_method}",
-                f"- InkyPi-Updateziel: {update_target}",
+                "",
+                "Dienste:",
+                f"- Datenbank: {'✓ ok' if db_ok else '✗ Fehler'}",
+                f"- Speicher: {'✓ ok' if storage_ok else '✗ Fehler'}",
+                f"- InkyPi-Payload: {'✓ vorhanden' if payload_ok else '✗ nicht gefunden'}",
+                "",
+                "Bilder:",
+                f"- In Rotation: {image_count} {'Bild' if image_count == 1 else 'Bilder'}",
+                f"- Aktuelles Bild: {_format_duration(displayed_at)}",
+                "",
+                "Nutzer:",
+                f"- Freigegebene Nutzer: {user_count}",
             ]
         )
     )
@@ -216,6 +246,7 @@ async def _navigate_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, d
     total = services.database.count_displayed_images()
     position = services.database.get_displayed_image_position(target.image_id)
     if result.success:
+        services.database.set_setting("current_image_displayed_at", utcnow_iso())
         await message.reply_text(f"Bild {position} von {total}: {target.image_id}")
     else:
         await message.reply_text(f"Anzeige fehlgeschlagen: {result.message}")
@@ -357,7 +388,9 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
             show_caption=show_caption,
             fit_mode=fit_mode,
         )
-        await asyncio.to_thread(services.display.display, display_request)
+        result = await asyncio.to_thread(services.display.display, display_request)
+        if result.success:
+            services.database.set_setting("current_image_displayed_at", utcnow_iso())
         total = services.database.count_displayed_images()
         await query.edit_message_caption(
             caption=f"Bild {image_id} gelöscht. Zeige jetzt {replacement.image_id} ({total} Bilder verbleibend)."

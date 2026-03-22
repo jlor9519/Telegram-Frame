@@ -332,6 +332,9 @@ class InkyPiAdapter:
     def _device_config_path(self) -> Path:
         return self.layout.device_config_path.resolve(strict=False)
 
+    def payload_exists(self) -> bool:
+        return self.storage.current_payload_path.exists()
+
     def current_orientation(self) -> str:
         try:
             settings = self.read_device_settings()
