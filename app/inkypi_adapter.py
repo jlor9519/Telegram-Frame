@@ -131,6 +131,17 @@ class InkyPiAdapter:
                 saved=True,
             )
 
+        # Re-assert our settings in case InkyPi overwrote them during startup.
+        # InkyPi may write to device.json on startup (e.g. updating latest_refresh_time from
+        # its in-memory state), which can reset image_settings to stale values.
+        # We exclude playlist_config so we don't undo changes from _sync_active_plugin_instance.
+        settings_to_preserve = {k: v for k, v in merged.items() if k != "playlist_config"}
+        if settings_to_preserve:
+            try:
+                _write_device_json(device_config_path, settings_to_preserve)
+            except Exception:
+                logger.warning("Failed to re-assert settings after InkyPi restart", exc_info=True)
+
         if not refresh_current:
             return DeviceSettingsApplyResult(
                 success=True,
@@ -171,6 +182,15 @@ class InkyPiAdapter:
             )
 
         refresh_result = self._trigger_display_update(self.storage.current_payload_path)
+
+        # Re-assert again after display trigger: _sync_active_plugin_instance reads device.json
+        # fresh and writes it back, which may have picked up InkyPi-reset values.
+        if settings_to_preserve:
+            try:
+                _write_device_json(device_config_path, settings_to_preserve)
+            except Exception:
+                logger.warning("Failed to re-assert settings after display refresh", exc_info=True)
+
         if not refresh_result.success:
             return DeviceSettingsApplyResult(
                 success=False,
