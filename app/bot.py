@@ -10,12 +10,18 @@ from app.commands import (
     delete_command,
     delete_confirm_callback,
     help_command,
+    list_command,
     myid_command,
     next_command,
     prev_command,
     refresh_command,
+    restore_cancel_callback,
+    restore_command,
+    restore_confirm_callback,
     status_command,
     stray_text_handler,
+    unwhitelist_command,
+    users_command,
     whitelist_command,
 )
 from app.conversations import build_photo_conversation
@@ -37,10 +43,16 @@ def build_application(services: AppServices) -> Application:
     application.add_handler(CommandHandler("whitelist", whitelist_command))
     application.add_handler(CommandHandler("next", next_command))
     application.add_handler(CommandHandler("prev", prev_command))
+    application.add_handler(CommandHandler("list", list_command))
     application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CallbackQueryHandler(delete_confirm_callback, pattern=r"^delete_confirm:"))
     application.add_handler(CallbackQueryHandler(delete_cancel_callback, pattern=r"^delete_cancel$"))
     application.add_handler(CommandHandler("refresh", refresh_command))
+    application.add_handler(CommandHandler("restore", restore_command))
+    application.add_handler(CommandHandler("users", users_command))
+    application.add_handler(CommandHandler("unwhitelist", unwhitelist_command))
+    application.add_handler(CallbackQueryHandler(restore_confirm_callback, pattern=r"^restore_confirm$"))
+    application.add_handler(CallbackQueryHandler(restore_cancel_callback, pattern=r"^restore_cancel$"))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, stray_text_handler))
     return application

@@ -21,19 +21,62 @@ class _SettingDef:
     label: str
     key: str               # top-level key in device.json, or db setting key
     subkey: str | None     # key inside image_settings, or None
-    kind: str              # "float" | "orientation" | "fit_mode"
+    kind: str              # "float" | "orientation" | "fit_mode" | "integer"
 
 
 _SETTINGS: list[_SettingDef] = [
-    _SettingDef("Sättigung",      "image_settings", "saturation", "float"),
-    _SettingDef("Kontrast",       "image_settings", "contrast",   "float"),
-    _SettingDef("Schärfe",        "image_settings", "sharpness",  "float"),
-    _SettingDef("Helligkeit",     "image_settings", "brightness", "float"),
-    _SettingDef("Ausrichtung",    "orientation",    None,         "orientation"),
-    _SettingDef("Bildanpassung",  "image_fit_mode", None,         "fit_mode"),
+    _SettingDef("Sättigung",           "image_settings",    "saturation", "float"),
+    _SettingDef("Kontrast",            "image_settings",    "contrast",   "float"),
+    _SettingDef("Schärfe",             "image_settings",    "sharpness",  "float"),
+    _SettingDef("Helligkeit",          "image_settings",    "brightness", "float"),
+    _SettingDef("Ausrichtung",         "orientation",       None,         "orientation"),
+    _SettingDef("Bildanpassung",       "image_fit_mode",    None,         "fit_mode"),
+    _SettingDef("Lokales Bildlimit",   "local_image_limit", None,         "integer"),
+    _SettingDef("Anzeigedauer",        "slideshow_interval",None,         "interval"),
 ]
 
 _FIT_MODE_LABELS = {"fill": "Zuschneiden", "contain": "Einpassen"}
+
+_INTERVAL_MIN = 300       # 5 minutes
+_INTERVAL_MAX = 604800    # 7 days
+
+
+def _format_interval_label(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} Sekunden"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} {'Minute' if minutes == 1 else 'Minuten'}"
+    hours = minutes // 60
+    rem_min = minutes % 60
+    if hours < 24:
+        return f"{hours} Std. {rem_min} Min." if rem_min else f"{hours} {'Stunde' if hours == 1 else 'Stunden'}"
+    days = hours // 24
+    rem_h = hours % 24
+    return f"{days} {'Tag' if days == 1 else 'Tage'} {rem_h} Std." if rem_h else f"{days} {'Tag' if days == 1 else 'Tage'}"
+
+
+def _parse_interval_input(text: str) -> int | None:
+    """Parse user interval input into seconds. Returns None if invalid."""
+    text = text.strip().lower().replace(",", ".")
+    _UNIT_MAP = {
+        "s": 1, "sek": 1, "sekunde": 1, "sekunden": 1,
+        "m": 60, "min": 60, "minute": 60, "minuten": 60,
+        "h": 3600, "std": 3600, "stunde": 3600, "stunden": 3600,
+        "d": 86400, "tag": 86400, "tage": 86400,
+    }
+    for unit, factor in sorted(_UNIT_MAP.items(), key=lambda x: -len(x[0])):
+        if text.endswith(unit):
+            num_str = text[: -len(unit)].strip()
+            try:
+                return int(float(num_str) * factor)
+            except ValueError:
+                return None
+    # No unit — assume hours
+    try:
+        return int(float(text) * 3600)
+    except ValueError:
+        return None
 
 _FIT_MODE_MAP = {
     "zuschneiden": "fill",
@@ -55,6 +98,14 @@ def _get_current_value(settings: dict[str, Any], s: _SettingDef) -> str:
     if s.kind == "fit_mode":
         raw = str(settings.get("image_fit_mode", "fill"))
         return _FIT_MODE_LABELS.get(raw, raw)
+    if s.kind == "integer":
+        return str(settings.get(s.key, "50"))
+    if s.kind == "interval":
+        raw = settings.get(s.key, 86400)
+        try:
+            return _format_interval_label(int(raw))
+        except (ValueError, TypeError):
+            return "24 Stunden"
     if s.subkey:
         return str(settings.get(s.key, {}).get(s.subkey, "?"))
     return str(settings.get(s.key, "?"))
@@ -98,6 +149,8 @@ async def settings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
     # Inject database-stored settings for display
     device_settings["image_fit_mode"] = services.database.get_setting("image_fit_mode") or "fill"
+    device_settings["local_image_limit"] = services.database.get_setting("local_image_limit") or "50"
+    device_settings["slideshow_interval"] = services.display.get_slideshow_interval()
     await update.effective_message.reply_text(_format_settings_list(device_settings))
     return WAITING_FOR_SETTINGS_CHOICE
 
@@ -126,6 +179,11 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
     if s.kind == "fit_mode":
         current_raw = services.database.get_setting("image_fit_mode") or "fill"
         current = _FIT_MODE_LABELS.get(current_raw, current_raw)
+    elif s.kind == "integer":
+        current = services.database.get_setting(s.key) or "50"
+    elif s.kind == "interval":
+        raw_seconds = services.display.get_slideshow_interval()
+        current = _format_interval_label(raw_seconds)
     else:
         current = _get_current_value(services.display.read_device_settings(), s)
 
@@ -140,6 +198,20 @@ async def receive_settings_choice(update: Update, context: ContextTypes.DEFAULT_
             "Zuschneiden — Bild wird auf den Rahmen zugeschnitten (Ränder werden ggf. abgeschnitten)\n"
             "Einpassen — Bild wird vollständig angezeigt (unscharfer Hintergrund füllt die Ränder)\n\n"
             "Gib den neuen Wert ein: Zuschneiden oder Einpassen."
+        )
+    elif s.kind == "integer":
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current} Bilder\n\n"
+            "Wie viele Original-Bilder sollen maximal lokal auf dem Pi gespeichert bleiben? "
+            "Ältere Bilder werden gelöscht, sobald sie in Dropbox gesichert wurden.\n\n"
+            "Gib eine Zahl zwischen 5 und 500 ein:"
+        )
+    elif s.kind == "interval":
+        await update.effective_message.reply_text(
+            f"Aktueller Wert für {s.label}: {current}\n\n"
+            "Wie lange soll jedes Bild angezeigt werden?\n"
+            "Beispiele: 30m, 1h, 2h, 6h, 1d\n"
+            "(Minimum 5 Minuten, Maximum 7 Tage)"
         )
     else:
         await update.effective_message.reply_text(
@@ -185,6 +257,48 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
         services.database.set_setting("image_fit_mode", fit_mode)
         label = _FIT_MODE_LABELS.get(fit_mode, fit_mode)
         await update.effective_message.reply_text(f"{s.label} ist jetzt {label}.")
+        return ConversationHandler.END
+    elif s.kind == "integer":
+        try:
+            int_value = int(text.replace(",", ""))
+        except ValueError:
+            await update.effective_message.reply_text(
+                "Ungültiger Wert. Bitte gib eine ganze Zahl ein, oder nutze /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        if int_value < 5 or int_value > 500:
+            await update.effective_message.reply_text(
+                "Der Wert muss zwischen 5 und 500 liegen. Bitte erneut eingeben oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        services.database.set_setting(s.key, str(int_value))
+        await update.effective_message.reply_text(f"{s.label} ist jetzt {int_value} Bilder.")
+        return ConversationHandler.END
+    elif s.kind == "interval":
+        seconds = _parse_interval_input(text)
+        if seconds is None:
+            await update.effective_message.reply_text(
+                "Ungültiges Format. Beispiele: 30m, 1h, 2h, 1d — oder nutze /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        if seconds < _INTERVAL_MIN or seconds > _INTERVAL_MAX:
+            await update.effective_message.reply_text(
+                f"Der Wert muss zwischen 5 Minuten und 7 Tagen liegen. Bitte erneut eingeben oder /cancel."
+            )
+            context.user_data[PENDING_SETTINGS_KEY] = idx
+            return WAITING_FOR_SETTINGS_VALUE
+        try:
+            result = services.display.set_slideshow_interval(seconds)
+        except Exception as exc:
+            logger.exception("Failed to set slideshow interval")
+            await update.effective_message.reply_text(f"Fehler beim Speichern: {exc}")
+            return ConversationHandler.END
+        label = _format_interval_label(seconds)
+        status = f"{s.label} ist jetzt {label}" if result.success else f"{s.label} wurde als {label} gespeichert"
+        await update.effective_message.reply_text(f"{status}.\n{result.message}")
         return ConversationHandler.END
     else:
         try:

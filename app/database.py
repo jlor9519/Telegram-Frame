@@ -300,6 +300,58 @@ class Database:
             last_error=row["last_error"],
         )
 
+    def get_all_images_ordered(self) -> list[ImageRecord]:
+        """All image records ordered oldest-first, for pruning decisions."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM images ORDER BY created_at ASC"
+            ).fetchall()
+            return [self._row_to_image(r) for r in rows]
+
+    def get_next_images(self, current_image_id: str, n: int) -> list[ImageRecord]:
+        """Get the next N displayed images after current_image_id, wrapping around."""
+        with self._lock:
+            current = self._connection.execute(
+                "SELECT created_at FROM images WHERE image_id = ?", (current_image_id,)
+            ).fetchone()
+            if current is None:
+                return []
+            current_created_at = current["created_at"]
+
+            rows = self._connection.execute(
+                "SELECT * FROM images WHERE created_at > ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
+                (current_created_at, *self._DISPLAYED_STATUSES, n),
+            ).fetchall()
+            results = [self._row_to_image(r) for r in rows]
+
+            if len(results) < n:
+                remaining = n - len(results)
+                wrap_rows = self._connection.execute(
+                    "SELECT * FROM images WHERE image_id != ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
+                    (current_image_id, *self._DISPLAYED_STATUSES, remaining),
+                ).fetchall()
+                results.extend(self._row_to_image(r) for r in wrap_rows)
+
+            return results
+
+    def get_whitelisted_users(self) -> list[dict]:
+        """Return all whitelisted users ordered by created_at."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM users WHERE is_whitelisted = 1 ORDER BY created_at ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def remove_whitelist(self, telegram_user_id: int) -> bool:
+        """Set is_whitelisted = 0 for the user. Returns True if the user existed."""
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE users SET is_whitelisted = 0, is_admin = 0 WHERE telegram_user_id = ?",
+                (telegram_user_id,),
+            )
+            self._connection.commit()
+            return cursor.rowcount > 0
+
     def get_setting(self, key: str) -> str | None:
         with self._lock:
             row = self._connection.execute(

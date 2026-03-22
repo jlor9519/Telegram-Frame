@@ -438,6 +438,27 @@ async def _process_image(
     record.status = "displayed_with_warnings" if warnings else "displayed"
     record.last_error = " | ".join(warnings) if warnings else None
     services.storage.cleanup_rendered_cache()
+
+    # Back up the database after every successful display
+    if services.dropbox.enabled:
+        try:
+            await asyncio.to_thread(
+                services.dropbox.backup_database,
+                services.config.database.path,
+            )
+        except Exception as exc:  # pragma: no cover
+            warnings.append(f"Dropbox database backup failed: {exc}")
+
+    # Prune local originals if over the configured limit
+    if services.dropbox.enabled:
+        try:
+            limit_str = services.database.get_setting("local_image_limit")
+            limit = int(limit_str) if limit_str and limit_str.isdigit() else 50
+            all_records = services.database.get_all_images_ordered()
+            await asyncio.to_thread(services.storage.prune_local_originals, limit, all_records)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Local pruning failed: %s", exc)
+
     return record, warnings
 
 

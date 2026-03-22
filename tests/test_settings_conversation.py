@@ -156,6 +156,9 @@ class _FakeDisplay:
     def read_device_settings(self) -> dict[str, object]:
         return self.settings
 
+    def get_slideshow_interval(self) -> int:
+        return 86400
+
     def apply_device_settings(
         self,
         updates: dict[str, object],

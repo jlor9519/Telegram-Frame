@@ -347,6 +347,68 @@ class InkyPiAdapter:
             return "horizontal"
         return orientation
 
+    def get_slideshow_interval(self) -> int:
+        """Return the slideshow refresh interval in seconds from device.json, default 86400."""
+        try:
+            data = self.read_device_settings()
+        except (OSError, json.JSONDecodeError):
+            return 86400
+        return self._read_plugin_refresh_interval(data)
+
+    def set_slideshow_interval(self, seconds: int) -> DeviceSettingsApplyResult:
+        """Update the Telegram Frame plugin refresh interval in device.json and restart InkyPi."""
+        device_config_path = self._device_config_path()
+        try:
+            data = self.read_device_settings()
+            playlist_config = data.get("playlist_config")
+            if not isinstance(playlist_config, dict):
+                return DeviceSettingsApplyResult(
+                    success=False,
+                    message="playlist_config nicht in device.json gefunden. Bitte führe die Einrichtung erneut aus.",
+                    confirmed_settings={},
+                )
+            updated = False
+            for playlist in playlist_config.get("playlists", []):
+                if not isinstance(playlist, dict):
+                    continue
+                for plugin in playlist.get("plugins", []):
+                    if not isinstance(plugin, dict):
+                        continue
+                    if plugin.get("plugin_id") == self.config.plugin_id:
+                        plugin.setdefault("refresh", {})["interval"] = int(seconds)
+                        updated = True
+            if not updated:
+                return DeviceSettingsApplyResult(
+                    success=False,
+                    message="Plugin-Instanz nicht gefunden. Bitte führe die Einrichtung erneut aus.",
+                    confirmed_settings={},
+                )
+            data["playlist_config"] = playlist_config
+            _write_device_json(device_config_path, data)
+        except Exception as exc:
+            return DeviceSettingsApplyResult(
+                success=False,
+                message=f"Fehler beim Speichern: {exc}",
+                confirmed_settings={},
+            )
+        return self.apply_device_settings({}, refresh_current=True)
+
+    def _read_plugin_refresh_interval(self, data: dict) -> int:
+        playlist_config = data.get("playlist_config")
+        if not isinstance(playlist_config, dict):
+            return 86400
+        for playlist in playlist_config.get("playlists", []):
+            if not isinstance(playlist, dict):
+                continue
+            for plugin in playlist.get("plugins", []):
+                if not isinstance(plugin, dict):
+                    continue
+                if plugin.get("plugin_id") == self.config.plugin_id:
+                    interval = plugin.get("refresh", {}).get("interval")
+                    if isinstance(interval, (int, float)) and interval > 0:
+                        return int(interval)
+        return 86400
+
     def _sync_active_plugin_instance(self, payload_path: Path) -> DisplayResult | None:
         device_config_path = self._device_config_path()
         try:
