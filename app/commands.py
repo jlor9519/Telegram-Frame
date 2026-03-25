@@ -272,22 +272,24 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             parts.append(record.taken_at)
         return " • ".join(parts) if parts else "(kein Text)"
 
-    lines = [f"Bilder ({total} gesamt):", ""]
+    lines = [f"Bilderliste ({total} gesamt)", ""]
 
     current_record = services.database.get_image_by_id(current_image_id)
     current_label = _image_label(current_record) if current_record else "(unbekannt)"
-    remaining_str = _format_interval(remaining) if remaining > 0 else "gleich"
-    lines.append(f"▶ [{current_pos}/{total}] {current_image_id[:16]}…")
-    lines.append(f"  {current_label}")
+    remaining_str = _format_interval(remaining) if remaining > 0 else "weniger als 1 Minute"
+    lines.append("Aktuell angezeigt:")
+    lines.append(f"▶ [{current_pos}/{total}] {current_label}")
     lines.append(f"  Wechsel in ca. {remaining_str}")
 
-    for i, record in enumerate(next_images, 1):
-        offset = remaining + (i - 1) * interval
-        eta_str = _format_interval(offset) if offset > 0 else "gleich"
+    if next_images:
         lines.append("")
-        lines.append(f"{i}. {record.image_id[:16]}…")
-        lines.append(f"   {_image_label(record)}")
-        lines.append(f"   In ca. {eta_str}")
+        lines.append("Nächste Bilder:")
+        for i, record in enumerate(next_images, 1):
+            offset = remaining + (i - 1) * interval
+            pos = ((current_pos or 0) + i - 1) % total + 1
+            eta_str = _format_interval(offset) if offset > 0 else "weniger als 1 Minute"
+            lines.append(f"{i}. [{pos}/{total}] {_image_label(record)}")
+            lines.append(f"   In ca. {eta_str}")
 
     await message.reply_text("\n".join(lines))
 
