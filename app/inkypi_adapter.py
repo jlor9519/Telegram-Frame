@@ -472,6 +472,21 @@ class InkyPiAdapter:
             )
         return self.apply_device_settings({}, refresh_current=True)
 
+    def ping_inkypi(self) -> bool | None:
+        """Return True=reachable, False=unreachable, None=not applicable (non-HTTP mode)."""
+        if self.config.update_method != "http_update_now":
+            return None
+        update_parts = parse.urlsplit(self.config.update_now_url)
+        probe_url = parse.urlunsplit((update_parts.scheme, update_parts.netloc, "/", "", ""))
+        try:
+            with request.urlopen(probe_url, timeout=5) as response:
+                response.read(1)
+                return True
+        except error.HTTPError:
+            return True  # any HTTP response means InkyPi is up
+        except Exception:
+            return False
+
     def _read_plugin_refresh_interval(self, data: dict) -> int:
         playlist_config = data.get("playlist_config")
         if not isinstance(playlist_config, dict):

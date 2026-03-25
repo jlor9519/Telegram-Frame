@@ -92,6 +92,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     storage_ok = services.storage.healthcheck()
     payload_ok = services.display.payload_exists()
 
+    inkypi_reachable = await asyncio.to_thread(services.display.ping_inkypi)
+    if inkypi_reachable is None:
+        inkypi_line = "– lokal"
+    elif inkypi_reachable:
+        inkypi_line = "✓ erreichbar"
+    else:
+        inkypi_line = "✗ nicht erreichbar"
+
     dropbox_line: str
     if not services.config.dropbox.enabled:
         dropbox_line = "✗ deaktiviert"
@@ -113,6 +121,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "Dienste:",
                 f"- Datenbank: {'✓ ok' if db_ok else '✗ Fehler'}",
                 f"- Speicher: {'✓ ok' if storage_ok else '✗ Fehler'}",
+                f"- InkyPi: {inkypi_line}",
                 f"- InkyPi-Payload: {'✓ vorhanden' if payload_ok else '✗ nicht gefunden'}",
                 f"- Dropbox: {dropbox_line}",
                 "",
@@ -177,12 +186,16 @@ async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         services = get_services(context)
         result = await asyncio.to_thread(services.display.refresh_only)
         await update.effective_message.reply_text(
-            "Aktualisierung ausgelöst." if result.success else f"Aktualisierung fehlgeschlagen: {result.message}"
+            "Aktualisierung ausgelöst." if result.success else _friendly_display_error(result.message)
         )
 
 
 def _friendly_display_error(message: str) -> str:
-    if "update_now request failed" in message or "timed out" in message:
+    lower = message.lower()
+    if any(p in lower for p in (
+        "request failed", "timed out", "connection refused",
+        "no route to host", "network is unreachable",
+    )):
         return "Display nicht erreichbar. Bitte prüfe die Verbindung zum Pi."
     return f"Anzeige fehlgeschlagen: {message}"
 
