@@ -16,6 +16,9 @@ JOB_NAME = "slideshow_advance"
 
 def schedule_slideshow_job(application: Application) -> None:
     """Schedule the slideshow auto-advance job. Called once on startup."""
+    if application.job_queue is None:
+        logger.warning("JobQueue not available — auto-advance disabled. Install: pip install 'python-telegram-bot[job-queue]'")
+        return
     services = application.bot_data["services"]
     interval = services.display.get_slideshow_interval()
     application.job_queue.run_repeating(
@@ -29,6 +32,8 @@ def schedule_slideshow_job(application: Application) -> None:
 
 def reschedule_slideshow_job(application: Application, interval_seconds: int | None = None) -> None:
     """Remove and re-schedule the slideshow job. Resets the timer."""
+    if application.job_queue is None:
+        return
     jobs = application.job_queue.get_jobs_by_name(JOB_NAME)
     for job in jobs:
         job.schedule_removal()
