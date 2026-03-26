@@ -38,8 +38,8 @@ def reschedule_slideshow_job(application: Application, interval_seconds: int | N
     for job in jobs:
         job.schedule_removal()
 
+    services = application.bot_data["services"]
     if interval_seconds is None:
-        services = application.bot_data["services"]
         interval_seconds = services.display.get_slideshow_interval()
 
     application.job_queue.run_repeating(
@@ -48,6 +48,8 @@ def reschedule_slideshow_job(application: Application, interval_seconds: int | N
         first=interval_seconds,
         name=JOB_NAME,
     )
+    # Sync the displayed-at timestamp so /list countdown matches the new timer
+    services.database.set_setting("current_image_displayed_at", utcnow_iso())
     logger.info("Slideshow job rescheduled with interval %ds", interval_seconds)
 
 
@@ -74,6 +76,7 @@ def _is_in_sleep_window(schedule: tuple[str, str]) -> bool:
 
 async def _advance_slideshow(context) -> None:
     """Auto-advance to the next image. Called by JobQueue."""
+    logger.debug("Slideshow auto-advance job triggered")
     services = context.application.bot_data["services"]
     lock = context.application.bot_data["display_lock"]
 
