@@ -327,8 +327,8 @@ class Database:
             if len(results) < n:
                 remaining = n - len(results)
                 wrap_rows = self._connection.execute(
-                    "SELECT * FROM images WHERE image_id != ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
-                    (current_image_id, *self._DISPLAYED_STATUSES, remaining),
+                    "SELECT * FROM images WHERE created_at <= ? AND image_id != ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
+                    (current_created_at, current_image_id, *self._DISPLAYED_STATUSES, remaining),
                 ).fetchall()
                 results.extend(self._row_to_image(r) for r in wrap_rows)
 
