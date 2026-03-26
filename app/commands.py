@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from app.auth import require_admin, require_whitelist
 from app.database import utcnow_iso
-from app.models import AppServices, DisplayRequest, ImageRecord, ProcessingReservation
+from app.models import AppServices, DisplayRequest, DisplayResult, ImageRecord, ProcessingReservation
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> AppServices:
@@ -277,8 +277,9 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     current_record = services.database.get_image_by_id(current_image_id)
     current_label = _image_label(current_record) if current_record else "(unbekannt)"
     remaining_str = _format_interval(remaining) if remaining > 0 else "weniger als 1 Minute"
-    lines.append("Aktuell angezeigt:")
-    lines.append(f"▶ [{current_pos}/{total}] {current_label}")
+    #lines.append("Aktuell angezeigt:")
+    #lines.append(f"▶ [{current_pos}/{total}] {current_label}")
+    lines.append(f"{current_label}")
     lines.append(f"  Wechsel in ca. {remaining_str}")
 
     if next_images:
@@ -292,6 +293,62 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             lines.append(f"   In ca. {eta_str}")
 
     await message.reply_text("\n".join(lines))
+
+
+async def _display_target(services: AppServices, target: ImageRecord) -> DisplayResult:
+    """Render, display, and upload a target image. Caller must hold display_lock."""
+    rendered_path = Path(target.local_rendered_path) if target.local_rendered_path else None
+    original_path = Path(target.local_original_path)
+
+    if rendered_path is None or not rendered_path.exists():
+        if not original_path.exists():
+            if target.dropbox_original_path and services.dropbox.enabled:
+                downloaded = await asyncio.to_thread(
+                    services.dropbox.download_file,
+                    target.dropbox_original_path,
+                    original_path,
+                )
+                if not downloaded:
+                    return DisplayResult(False, f"Download von {target.image_id} fehlgeschlagen.")
+            else:
+                return DisplayResult(False, f"Bilddatei für {target.image_id} nicht mehr vorhanden.")
+        rendered_path = services.storage.rendered_path(target.image_id)
+        await asyncio.to_thread(
+            services.renderer.render,
+            original_path,
+            rendered_path,
+            location=target.location,
+            taken_at=target.taken_at,
+            caption=target.caption,
+        )
+        target.local_rendered_path = str(rendered_path)
+        services.database.upsert_image(target)
+
+    show_caption = bool(target.caption or target.location or target.taken_at)
+    fit_mode = services.database.get_setting("image_fit_mode") or "fill"
+    display_request = DisplayRequest(
+        image_id=target.image_id,
+        original_path=original_path,
+        composed_path=rendered_path,
+        location=target.location,
+        taken_at=target.taken_at,
+        caption=target.caption,
+        created_at=target.created_at,
+        uploaded_by=target.uploaded_by,
+        show_caption=show_caption,
+        fit_mode=fit_mode,
+    )
+
+    result = await asyncio.to_thread(services.display.display, display_request)
+
+    if services.dropbox.enabled:
+        await asyncio.to_thread(
+            services.dropbox.upload_display_payload,
+            services.config.storage.current_payload_path,
+            services.config.storage.current_image_path,
+        )
+
+    return result
 
 
 async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str) -> None:
@@ -334,58 +391,15 @@ async def _navigate_locked(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         await message.reply_text("Kein weiteres Bild vorhanden.")
         return
 
-    rendered_path = Path(target.local_rendered_path) if target.local_rendered_path else None
-    original_path = Path(target.local_original_path)
-
-    if rendered_path is None or not rendered_path.exists():
-        if not original_path.exists():
-            if target.dropbox_original_path and services.dropbox.enabled:
-                await message.reply_text("Bilddatei wird von Dropbox heruntergeladen…")
-                downloaded = await asyncio.to_thread(
-                    services.dropbox.download_file,
-                    target.dropbox_original_path,
-                    original_path,
-                )
-                if not downloaded:
-                    await message.reply_text(f"Download von {target.image_id} fehlgeschlagen.")
-                    return
-            else:
-                await message.reply_text(f"Bilddatei für {target.image_id} nicht mehr vorhanden.")
-                return
-        rendered_path = services.storage.rendered_path(target.image_id)
-        await asyncio.to_thread(
-            services.renderer.render,
-            original_path,
-            rendered_path,
-            location=target.location,
-            taken_at=target.taken_at,
-            caption=target.caption,
-        )
-        target.local_rendered_path = str(rendered_path)
-        services.database.upsert_image(target)
-
-    show_caption = bool(target.caption or target.location or target.taken_at)
-    fit_mode = services.database.get_setting("image_fit_mode") or "fill"
-    display_request = DisplayRequest(
-        image_id=target.image_id,
-        original_path=original_path,
-        composed_path=rendered_path,
-        location=target.location,
-        taken_at=target.taken_at,
-        caption=target.caption,
-        created_at=target.created_at,
-        uploaded_by=target.uploaded_by,
-        show_caption=show_caption,
-        fit_mode=fit_mode,
-    )
-
-    result = await asyncio.to_thread(services.display.display, display_request)
+    result = await _display_target(services, target)
 
     total = services.database.count_displayed_images()
     position = services.database.get_displayed_image_position(target.image_id)
     if result.success:
         services.database.set_setting("current_image_displayed_at", utcnow_iso())
         await message.reply_text(f"Bild {position} von {total}: {target.image_id}")
+        from app.slideshow import reschedule_slideshow_job
+        reschedule_slideshow_job(context.application)
     else:
         await message.reply_text(_friendly_display_error(result.message))
 
@@ -497,61 +511,16 @@ async def delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
                 if remote_path:
                     await asyncio.to_thread(services.dropbox.delete_file, remote_path)
 
-        rendered_path = Path(replacement.local_rendered_path) if replacement.local_rendered_path else None
-        original_path = Path(replacement.local_original_path)
+        result = await _display_target(services, replacement)
 
-        if rendered_path is None or not rendered_path.exists():
-            if not original_path.exists():
-                if replacement.dropbox_original_path and services.dropbox.enabled:
-                    downloaded = await asyncio.to_thread(
-                        services.dropbox.download_file,
-                        replacement.dropbox_original_path,
-                        original_path,
-                    )
-                    if not downloaded:
-                        await query.edit_message_caption(
-                            caption=f"Bild {image_id} gelöscht. Nächstes Bild nicht verfügbar."
-                        )
-                        return
-                else:
-                    await query.edit_message_caption(
-                        caption=f"Bild {image_id} gelöscht. Nächstes Bild nicht verfügbar."
-                    )
-                    return
-            rendered_path = services.storage.rendered_path(replacement.image_id)
-            await asyncio.to_thread(
-                services.renderer.render,
-                original_path,
-                rendered_path,
-                location=replacement.location,
-                taken_at=replacement.taken_at,
-                caption=replacement.caption,
-            )
-            replacement.local_rendered_path = str(rendered_path)
-            services.database.upsert_image(replacement)
-
-        show_caption = bool(replacement.caption or replacement.location or replacement.taken_at)
-        fit_mode = services.database.get_setting("image_fit_mode") or "fill"
-        display_request = DisplayRequest(
-            image_id=replacement.image_id,
-            original_path=original_path,
-            composed_path=rendered_path,
-            location=replacement.location,
-            taken_at=replacement.taken_at,
-            caption=replacement.caption,
-            created_at=replacement.created_at,
-            uploaded_by=replacement.uploaded_by,
-            show_caption=show_caption,
-            fit_mode=fit_mode,
-        )
-        result = await asyncio.to_thread(services.display.display, display_request)
-        if result.success:
-            services.database.set_setting("current_image_displayed_at", utcnow_iso())
         total = services.database.count_displayed_images()
         if result.success:
+            services.database.set_setting("current_image_displayed_at", utcnow_iso())
             await query.edit_message_caption(
                 caption=f"Bild {image_id} gelöscht. Zeige jetzt {replacement.image_id} ({total} Bilder verbleibend)."
             )
+            from app.slideshow import reschedule_slideshow_job
+            reschedule_slideshow_job(context.application)
         else:
             await query.edit_message_caption(
                 caption=f"Bild {image_id} gelöscht. {_friendly_display_error(result.message)}"

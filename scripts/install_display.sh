@@ -10,8 +10,8 @@ ensure_not_running_as_root
 ensure_runtime_files
 
 echo "=== Display Pi installer ==="
-echo "This installs InkyPi and the telegram_frame plugin."
-echo "No Telegram bot, no database, and no Dropbox are installed here."
+echo "This installs InkyPi, the telegram_frame plugin, and optional Dropbox sync."
+echo "No Telegram bot and no database are installed here."
 echo
 
 if ask_yes_no "Install/update apt packages needed for Python, Git, and Pillow?" "y"; then
@@ -54,6 +54,76 @@ set_yaml_value inkypi.update_now_url string "${inkypi_update_now_url}"
 set_yaml_value inkypi.refresh_command string "${refresh_command}"
 
 bash "${PROJECT_ROOT}/scripts/setup_inkypi.sh"
+
+# Dropbox sync setup
+dropbox_enabled_current="$(get_yaml_value dropbox.enabled bool)"
+if [[ "${dropbox_enabled_current}" == "true" ]]; then
+  dropbox_default="y"
+else
+  dropbox_default="n"
+fi
+if ask_yes_no "Enable Dropbox sync to receive images from a remote server Pi?" "${dropbox_default}"; then
+  dropbox_enabled="true"
+  dropbox_token="$(get_or_prompt_value "Dropbox access token" "$(get_env_value DROPBOX_ACCESS_TOKEN)" "" 0)"
+  set_env_value DROPBOX_ACCESS_TOKEN "${dropbox_token}"
+  set_yaml_value dropbox.enabled bool "true"
+  bash "${PROJECT_ROOT}/scripts/setup_dropbox.sh"
+
+  # Install display-sync systemd service
+  service_user="${SUDO_USER:-$(id -un)}"
+  sync_unit="display-sync.service"
+  sync_target="/etc/systemd/system/${sync_unit}"
+  sync_rendered="$("${RUN_PYTHON}" - "${PROJECT_ROOT}" "${VENV_DIR}" "${CONFIG_FILE}" "${service_user}" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+venv_dir = Path(sys.argv[2])
+config_path = Path(sys.argv[3])
+service_user = sys.argv[4]
+python_bin = venv_dir / "bin" / "python"
+command = "cd {cwd} && exec {python_bin} {script} --config {config_path}".format(
+    cwd=shlex.quote(str(project_root)),
+    python_bin=shlex.quote(str(python_bin)),
+    script=shlex.quote(str(project_root / "scripts" / "display_sync.py")),
+    config_path=shlex.quote(str(config_path)),
+)
+print(f"""[Unit]
+Description=Display Sync (Dropbox to InkyPi)
+After=network-online.target inkypi.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={service_user}
+WorkingDirectory={project_root}
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc {shlex.quote(command)}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+""")
+PY
+)"
+  if [[ "${MOCK_INSTALL}" == "1" ]]; then
+    mkdir -p "${MOCK_STATE_DIR}/systemd"
+    sync_target="${MOCK_STATE_DIR}/systemd/${sync_unit}"
+    printf '%s\n' "${sync_rendered}" > "${sync_target}"
+    echo "[mock] Wrote systemd unit to ${sync_target}"
+  else
+    printf '%s\n' "${sync_rendered}" | sudo tee "${sync_target}" >/dev/null
+    run_privileged systemctl daemon-reload
+    run_privileged systemctl enable "${sync_unit}"
+    run_privileged systemctl restart "${sync_unit}"
+    echo "Display sync service installed and started."
+  fi
+else
+  set_yaml_value dropbox.enabled bool "false"
+  echo "Dropbox sync skipped. Images must be transferred manually or via local network."
+fi
 
 # Show the display Pi's IP so the user can configure the server Pi
 echo

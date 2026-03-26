@@ -4,6 +4,7 @@ import asyncio
 
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from app.slideshow import schedule_slideshow_job
 from app.commands import (
     cancel_command,
     delete_cancel_callback,
@@ -29,11 +30,16 @@ from app.settings_conversation import build_settings_conversation
 from app.models import AppServices, ProcessingReservation
 
 
+async def _post_init(application: Application) -> None:
+    schedule_slideshow_job(application)
+
+
 def build_application(services: AppServices) -> Application:
     application = ApplicationBuilder().token(services.config.telegram.bot_token).build()
     application.bot_data["services"] = services
     application.bot_data["processing_reservation"] = ProcessingReservation()
     application.bot_data["display_lock"] = asyncio.Lock()
+    application.post_init = _post_init
 
     application.add_handler(build_photo_conversation())
     application.add_handler(build_settings_conversation())

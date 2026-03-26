@@ -380,6 +380,8 @@ async def receive_settings_value(update: Update, context: ContextTypes.DEFAULT_T
         label = _format_interval_label(seconds)
         status = f"{s.label} ist jetzt {label}" if result.success else f"{s.label} wurde als {label} gespeichert"
         await update.effective_message.reply_text(f"{status}.\n{result.message}")
+        from app.slideshow import reschedule_slideshow_job
+        reschedule_slideshow_job(context.application, seconds)
         return ConversationHandler.END
     else:
         try:

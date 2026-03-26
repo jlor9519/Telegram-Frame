@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -90,6 +91,31 @@ class DropboxService:
         except Exception as exc:
             logger.warning("Dropbox delete failed for %s: %s", remote_path, exc)
             return False
+
+    def upload_display_payload(self, payload_path: Path, image_path: Path) -> bool:
+        """Upload current.json + current.png to the display sync folder on Dropbox."""
+        if self._client is None:
+            return False
+        try:
+            self._upload(image_path, "display")
+            self._upload(payload_path, "display")
+            logger.info("Display payload uploaded to Dropbox")
+            return True
+        except Exception as exc:
+            logger.warning("Failed to upload display payload: %s", exc)
+            return False
+
+    def get_display_payload_revision(self) -> str | None:
+        """Fetch the revision field from the remote display payload. Returns None if unavailable."""
+        if self._client is None:
+            return None
+        remote_path = f"{self.config.root_path}/display/current.json".replace("//", "/")
+        try:
+            _, response = self._client.files_download(remote_path)
+            payload = json.loads(response.content)
+            return str(payload.get("revision", ""))
+        except Exception:
+            return None
 
     def check_connection(self) -> bool:
         """Live-ping Dropbox by fetching root folder metadata. Returns False if unreachable."""

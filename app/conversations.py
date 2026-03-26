@@ -359,6 +359,9 @@ async def _submit_photo(
     try:
         record, warnings = await _process_image(services, record, rendered_path, show_caption=show_caption, fit_mode=fit_mode)
         services.database.upsert_image(record)
+        if record.status not in ("failed", "display_failed"):
+            from app.slideshow import reschedule_slideshow_job
+            reschedule_slideshow_job(context.application)
         await message.reply_text(_build_success_reply(record, warnings))
         return ConversationHandler.END
     except Exception as exc:
@@ -419,6 +422,18 @@ async def _process_image(
     )
     logger.info("Sending image %s to display", record.image_id)
     display_result = await asyncio.to_thread(services.display.display, display_request)
+
+    # Upload display payload to Dropbox for remote display sync
+    if services.dropbox.enabled:
+        try:
+            await asyncio.to_thread(
+                services.dropbox.upload_display_payload,
+                services.config.storage.current_payload_path,
+                services.config.storage.current_image_path,
+            )
+        except Exception as exc:  # pragma: no cover
+            warnings.append(f"Dropbox display payload upload failed: {exc}")
+
     if not display_result.success:
         logger.warning("Display failed for image %s: %s", record.image_id, display_result.message)
         record.status = "display_failed"
