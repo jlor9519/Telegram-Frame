@@ -77,8 +77,8 @@ if [[ -n "${update_now_url}" ]]; then
 fi
 set_yaml_value dropbox.enabled bool "${dropbox_enabled}"
 
-initialize_database
 bash "${PROJECT_ROOT}/scripts/setup_dropbox.sh"
+initialize_database
 
 echo "Installing/updating photo-frame systemd service for user ${service_user}."
 ensure_service_unit "${service_user}" "${service_workdir}"
