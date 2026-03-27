@@ -72,7 +72,9 @@ For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set 
    git clone https://github.com/jlor9519/Telegram-Frame.git ~/EInkProject && cd ~/EInkProject
    bash scripts/install_server.sh
    ```
-   When prompted, enter your Telegram bot token, admin user ID, and the display Pi URL (e.g. `http://<display-pi-ip>`).
+   When prompted, enter your Telegram bot token and admin user ID.
+   If the display Pi is on a different network (e.g. a gift), answer "no" when asked if the
+   display Pi is on the same network — images will be delivered via Dropbox sync instead.
 
 ### Updating
 

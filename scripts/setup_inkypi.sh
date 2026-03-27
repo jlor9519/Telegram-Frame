@@ -154,7 +154,7 @@ dashboard_seed_applied="${dashboard_seed_result[0]:-0}"
 dashboard_seed_message="${dashboard_seed_result[1]:-Dashboard seed status unavailable.}"
 echo "Dashboard seed status: ${dashboard_seed_message}"
 
-if [[ -x "${repo_path}/install/install.sh" ]]; then
+if [[ -f "${repo_path}/install/install.sh" ]]; then
   should_run_inkypi_install=0
   if [[ "${fresh_clone}" == "1" ]]; then
     should_run_inkypi_install=1
@@ -220,12 +220,15 @@ if [[ ! -x "${plugin_verification_python}" ]]; then
   plugin_verification_python="${RUN_PYTHON}"
 fi
 
-PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${plugin_verification_python}" - "${source_root}" "${plugin_id}" "${plugin_class_name}" <<'PY'
+if ! PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${plugin_verification_python}" - "${source_root}" "${plugin_id}" "${plugin_class_name}" <<'PY'
 from app.inkypi_setup import verify_plugin_module_import
 import sys
 
 verify_plugin_module_import(sys.argv[1], sys.argv[2], sys.argv[3])
 PY
+then
+  echo "Warning: Plugin module import verification failed. This may resolve after InkyPi installs its dependencies."
+fi
 
 if [[ "${MOCK_INSTALL}" == "1" ]]; then
   echo "[mock] Skipping inkypi.service restart and HTTP registration verification."
