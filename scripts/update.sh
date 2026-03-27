@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NOTE: This script is for the legacy single-Pi setup (scripts/install.sh).
+# For the two-Pi setup, use update_server.sh or update_display.sh instead.
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"

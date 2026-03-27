@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 
 from telegram.ext import Application
 
@@ -53,6 +53,18 @@ def reschedule_slideshow_job(application: Application, interval_seconds: int | N
     logger.info("Slideshow job rescheduled with interval %ds", interval_seconds)
 
 
+def _seconds_until_wake_up(schedule: tuple[str, str]) -> int:
+    """Seconds from now until the sleep window's wake-up time."""
+    _, wake_up_str = schedule
+    wh, wm = wake_up_str.split(":")
+    wake_up = dt_time(int(wh), int(wm))
+    now = datetime.now()
+    target = now.replace(hour=wake_up.hour, minute=wake_up.minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return max(1, int((target - now).total_seconds()))
+
+
 def _is_in_sleep_window(schedule: tuple[str, str]) -> bool:
     """Check if current local time falls inside the sleep window."""
     sleep_start_str, wake_up_str = schedule
@@ -83,7 +95,18 @@ async def _advance_slideshow(context) -> None:
     # Check sleep schedule
     schedule = services.display.get_sleep_schedule()
     if schedule and _is_in_sleep_window(schedule):
-        logger.info("Skipping auto-advance — sleep schedule active")
+        wake_seconds = _seconds_until_wake_up(schedule)
+        jobs = context.application.job_queue.get_jobs_by_name(JOB_NAME)
+        for job in jobs:
+            job.schedule_removal()
+        interval = services.display.get_slideshow_interval()
+        context.application.job_queue.run_repeating(
+            _advance_slideshow,
+            interval=interval,
+            first=wake_seconds,
+            name=JOB_NAME,
+        )
+        logger.info("Sleep active — rescheduled slideshow for wake-up in %ds", wake_seconds)
         return
 
     # Skip if display is busy (non-blocking check)

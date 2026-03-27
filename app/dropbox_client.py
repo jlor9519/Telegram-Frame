@@ -21,8 +21,14 @@ class DropboxService:
     def __init__(self, config: DropboxConfig):
         self.config = config
         self._client = None
-        if self.config.enabled and self.config.access_token and dropbox is not None:
-            self._client = dropbox.Dropbox(self.config.access_token)
+        if self.config.enabled and dropbox is not None:
+            if self.config.refresh_token and self.config.app_key:
+                self._client = dropbox.Dropbox(
+                    oauth2_refresh_token=self.config.refresh_token,
+                    app_key=self.config.app_key,
+                )
+            elif self.config.access_token:
+                self._client = dropbox.Dropbox(self.config.access_token)
 
     @property
     def enabled(self) -> bool:

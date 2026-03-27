@@ -95,16 +95,25 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     dropbox_section = raw.get("dropbox", {})
     dropbox_env = str(dropbox_section.get("access_token_env", "DROPBOX_ACCESS_TOKEN"))
     dropbox_token = os.getenv(dropbox_env, "").strip() or None
+    refresh_token_env = str(dropbox_section.get("refresh_token_env", "DROPBOX_REFRESH_TOKEN"))
+    dropbox_refresh_token = os.getenv(refresh_token_env, "").strip() or None
+    dropbox_app_key = str(dropbox_section.get("app_key", "")).strip() or None
     dropbox_config = DropboxConfig(
         enabled=bool(dropbox_section.get("enabled", False)),
         access_token=dropbox_token,
+        app_key=dropbox_app_key,
+        refresh_token=dropbox_refresh_token,
         root_path=str(dropbox_section.get("root_path", "/photo-frame")).rstrip("/") or "/photo-frame",
         upload_rendered=bool(dropbox_section.get("upload_rendered", True)),
     )
-    if dropbox_config.enabled and not dropbox_config.access_token:
-        errors.append(
-            f"Dropbox is enabled but no access token is set in environment variable {dropbox_env}."
-        )
+    if dropbox_config.enabled:
+        has_refresh = dropbox_config.refresh_token and dropbox_config.app_key
+        has_access = dropbox_config.access_token
+        if not has_refresh and not has_access:
+            errors.append(
+                f"Dropbox is enabled but no credentials found. "
+                f"Set {refresh_token_env} + dropbox.app_key, or {dropbox_env}."
+            )
 
     display_section = raw.get("display", {})
     caption_height_value = display_section.get("caption_height", DEFAULT_CAPTION_HEIGHT)

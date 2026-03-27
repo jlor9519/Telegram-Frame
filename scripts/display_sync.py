@@ -79,9 +79,14 @@ def load_sync_config(config_path: Path) -> dict:
 
     dropbox_section = raw.get("dropbox", {})
     token_env = str(dropbox_section.get("access_token_env", "DROPBOX_ACCESS_TOKEN"))
-    token = os.getenv(token_env, "").strip()
-    if not token:
-        logger.error("No Dropbox token found in env var %s", token_env)
+    token = os.getenv(token_env, "").strip() or None
+    refresh_token_env = str(dropbox_section.get("refresh_token_env", "DROPBOX_REFRESH_TOKEN"))
+    refresh_token = os.getenv(refresh_token_env, "").strip() or None
+    app_key = str(dropbox_section.get("app_key", "")).strip() or None
+
+    has_refresh = refresh_token and app_key
+    if not has_refresh and not token:
+        logger.error("No Dropbox credentials found. Set %s + dropbox.app_key, or %s", refresh_token_env, token_env)
         sys.exit(1)
 
     root_path = str(dropbox_section.get("root_path", "/photo-frame")).rstrip("/") or "/photo-frame"
@@ -101,6 +106,8 @@ def load_sync_config(config_path: Path) -> dict:
 
     return {
         "dropbox_token": token,
+        "dropbox_refresh_token": refresh_token,
+        "dropbox_app_key": app_key,
         "root_path": root_path,
         "payload_dir": payload_path,
         "update_now_url": update_now_url,
@@ -210,7 +217,13 @@ def trigger_update(update_now_url: str, plugin_id: str, payload_path: Path) -> b
 
 def sync_once(config: dict) -> bool:
     """Run a single sync cycle. Returns True if a new image was displayed."""
-    client = dropbox.Dropbox(config["dropbox_token"])
+    if config.get("dropbox_refresh_token") and config.get("dropbox_app_key"):
+        client = dropbox.Dropbox(
+            oauth2_refresh_token=config["dropbox_refresh_token"],
+            app_key=config["dropbox_app_key"],
+        )
+    else:
+        client = dropbox.Dropbox(config["dropbox_token"])
     payload_dir = config["payload_dir"]
 
     new = download_and_patch(client, config["root_path"], payload_dir)

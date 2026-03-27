@@ -250,6 +250,7 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Time remaining for current image
     from datetime import datetime, timezone as tz
+    from app.slideshow import _is_in_sleep_window, _seconds_until_wake_up
     now = datetime.now(tz.utc)
     elapsed = 0
     if displayed_at:
@@ -261,6 +262,11 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         except (ValueError, TypeError):
             elapsed = 0
     remaining = max(0, interval - elapsed)
+
+    sleep_schedule = await asyncio.to_thread(services.display.get_sleep_schedule)
+    in_sleep = bool(sleep_schedule and _is_in_sleep_window(sleep_schedule))
+    if in_sleep:
+        remaining = _seconds_until_wake_up(sleep_schedule)
 
     def _image_label(record: ImageRecord) -> str:
         parts = []

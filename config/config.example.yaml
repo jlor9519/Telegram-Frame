@@ -20,7 +20,9 @@ storage:
 
 dropbox:
   enabled: false
+  app_key: ""
   access_token_env: DROPBOX_ACCESS_TOKEN
+  refresh_token_env: DROPBOX_REFRESH_TOKEN
   root_path: /photo-frame
   upload_rendered: true
 

@@ -49,6 +49,8 @@ class StorageConfig:
 class DropboxConfig:
     enabled: bool
     access_token: str | None
+    app_key: str | None
+    refresh_token: str | None
     root_path: str
     upload_rendered: bool
 

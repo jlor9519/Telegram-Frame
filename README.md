@@ -51,6 +51,20 @@ The expected Pi flow is:
 
 The scripts support reruns and can keep or replace existing values when reconfiguring a device.
 
+## Two-Pi setup
+
+For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another):
+
+1. On the **display Pi**, run `bash scripts/install_display.sh`.
+   Note the IP address printed at the end — you will need it for the next step.
+2. On the **server Pi**, run `bash scripts/install_server.sh`.
+   When prompted for the display Pi URL, enter `http://<display-pi-ip>`.
+
+To update after pulling new code:
+
+- On the server Pi: `bash scripts/update_server.sh`
+- On the display Pi: `bash scripts/update_display.sh`
+
 If you want to rehearse the shell prompt flow on a development machine without touching system services, run:
 
 ```bash
