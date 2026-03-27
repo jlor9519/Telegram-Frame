@@ -59,7 +59,7 @@ For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set 
    ```
 2. Clone this repository and run the display installer:
    ```bash
-   git clone https://github.com/jlor9519/EInkProject.git ~/EInkProject && cd ~/EInkProject
+   git clone https://github.com/jlor9519/Telegram-Frame.git ~/EInkProject && cd ~/EInkProject
    bash scripts/install_display.sh
    ```
    The script automatically clones InkyPi, injects the custom plugin, and starts the InkyPi service.
@@ -69,7 +69,7 @@ For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set 
 
 1. Clone this repository and run the server installer:
    ```bash
-   git clone https://github.com/jlor9519/EInkProject.git ~/EInkProject && cd ~/EInkProject
+   git clone https://github.com/jlor9519/Telegram-Frame.git ~/EInkProject && cd ~/EInkProject
    bash scripts/install_server.sh
    ```
    When prompted, enter your Telegram bot token, admin user ID, and the display Pi URL (e.g. `http://<display-pi-ip>`).
