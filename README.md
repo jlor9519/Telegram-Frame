@@ -39,31 +39,58 @@ scripts/                     Install, update, and debug helpers
 tests/                       Unit tests for core behavior
 ```
 
-## Setup summary
+## Prerequisites
 
-The expected Pi flow is:
+Before setting up either Pi, you will need:
 
-1. Clone this repository.
-2. Review `config/config.example.yaml`.
-3. Run `bash scripts/install.sh`.
-4. Answer the interactive prompts for Telegram, Dropbox, and InkyPi.
-5. Verify the bot starts and the custom InkyPi plugin is present in the InkyPi web UI.
-
-The scripts support reruns and can keep or replace existing values when reconfiguring a device.
+- A **Telegram bot token** from [@BotFather](https://t.me/BotFather)
+- Your **Telegram user ID** (send `/start` to [@userinfobot](https://t.me/userinfobot) to find it)
+- (Optional) A **Dropbox app** for cloud backup — see `config/config.example.yaml` for details
 
 ## Two-Pi setup
 
-For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another):
+For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set up the display Pi first.
 
-1. On the **display Pi**, run `bash scripts/install_display.sh`.
-   Note the IP address printed at the end — you will need it for the next step.
-2. On the **server Pi**, run `bash scripts/install_server.sh`.
-   When prompted for the display Pi URL, enter `http://<display-pi-ip>`.
+### Display Pi
 
-To update after pulling new code:
+1. Enable SPI (required for the e-ink display):
+   ```bash
+   sudo raspi-config nonint do_spi 0
+   ```
+2. Clone this repository and run the display installer:
+   ```bash
+   git clone https://github.com/jlor9519/EInkProject.git ~/EInkProject && cd ~/EInkProject
+   bash scripts/install_display.sh
+   ```
+   The script automatically clones InkyPi, injects the custom plugin, and starts the InkyPi service.
+   Note the IP address printed at the end.
+
+### Server Pi
+
+1. Clone this repository and run the server installer:
+   ```bash
+   git clone https://github.com/jlor9519/EInkProject.git ~/EInkProject && cd ~/EInkProject
+   bash scripts/install_server.sh
+   ```
+   When prompted, enter your Telegram bot token, admin user ID, and the display Pi URL (e.g. `http://<display-pi-ip>`).
+
+### Updating
 
 - On the server Pi: `bash scripts/update_server.sh`
 - On the display Pi: `bash scripts/update_display.sh`
+
+## Single-Pi setup
+
+To run everything on a single Pi (both the Telegram bot and the e-ink display):
+
+1. Enable SPI: `sudo raspi-config nonint do_spi 0`
+2. Clone this repository.
+3. Review `config/config.example.yaml`.
+4. Run `bash scripts/install.sh`.
+5. Answer the interactive prompts for Telegram, Dropbox, and InkyPi.
+6. Verify the bot starts and the custom InkyPi plugin is present in the InkyPi web UI.
+
+The scripts support reruns and can keep or replace existing values when reconfiguring a device.
 
 If you want to rehearse the shell prompt flow on a development machine without touching system services, run:
 

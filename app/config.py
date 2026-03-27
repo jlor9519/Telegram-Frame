@@ -166,8 +166,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     else:
         update_method = "command"
 
-    if update_method not in {"http_update_now", "command"}:
-        errors.append("inkypi.update_method must be either 'http_update_now' or 'command'.")
+    if update_method not in {"http_update_now", "command", "none"}:
+        errors.append("inkypi.update_method must be 'http_update_now', 'command', or 'none'.")
 
     update_now_url = str(inkypi_section.get("update_now_url", DEFAULT_UPDATE_NOW_URL)).strip()
     if update_method == "http_update_now" and not update_now_url:

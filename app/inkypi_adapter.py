@@ -230,6 +230,10 @@ class InkyPiAdapter:
         if plugin_sync_result is not None:
             return plugin_sync_result
 
+        if self.config.update_method == "none":
+            logger.info("Display update skipped (update_method=none, relying on Dropbox sync)")
+            return DisplayResult(True, "Display update deferred to Dropbox sync")
+
         if self.config.update_method == "http_update_now":
             logger.info("Triggering display via HTTP POST to %s", self.config.update_now_url)
             return self._post_update_now(payload_path)
