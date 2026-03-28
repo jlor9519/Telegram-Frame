@@ -9,11 +9,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = [
     PROJECT_ROOT / "scripts" / "common.sh",
     PROJECT_ROOT / "scripts" / "install.sh",
+    PROJECT_ROOT / "scripts" / "install_server.sh",
+    PROJECT_ROOT / "scripts" / "install_display.sh",
     PROJECT_ROOT / "scripts" / "mock_install.sh",
     PROJECT_ROOT / "scripts" / "test_telegram_bot.sh",
     PROJECT_ROOT / "scripts" / "setup_inkypi.sh",
     PROJECT_ROOT / "scripts" / "setup_dropbox.sh",
     PROJECT_ROOT / "scripts" / "update.sh",
+    PROJECT_ROOT / "scripts" / "update_server.sh",
+    PROJECT_ROOT / "scripts" / "update_display.sh",
 ]
 
 

@@ -347,6 +347,67 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.display.caption_character_limit, 72)
             self.assertEqual(config.display.max_caption_lines, 1)
 
+    def test_load_config_rejects_remote_mode_without_dropbox(self) -> None:
+        if find_spec("yaml") is None or find_spec("dotenv") is None:
+            self.skipTest("PyYAML and python-dotenv are required for config tests.")
+
+        import yaml
+
+        from app.config import ConfigError, load_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "telegram": {"bot_token_env": "REMOTE_TELEGRAM_TOKEN"},
+                        "security": {},
+                        "database": {"path": "data/db/test.db"},
+                        "storage": {
+                            "incoming_dir": "data/incoming",
+                            "rendered_dir": "data/rendered",
+                            "cache_dir": "data/cache",
+                            "archive_dir": "data/archive",
+                            "inkypi_payload_dir": "data/inkypi",
+                            "current_payload_path": "data/inkypi/current.json",
+                            "current_image_path": "data/inkypi/current.png",
+                            "keep_recent_rendered": 3,
+                        },
+                        "dropbox": {"enabled": False},
+                        "display": {
+                            "width": 800,
+                            "height": 480,
+                            "caption_height": 120,
+                            "margin": 12,
+                            "metadata_font_size": 20,
+                            "caption_font_size": 26,
+                            "max_caption_lines": 2,
+                            "font_path": "/tmp/does-not-exist.ttf",
+                            "background_color": "#FFFFFF",
+                            "text_color": "#000000",
+                            "divider_color": "#333333",
+                        },
+                        "inkypi": {
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
+                            "validated_commit": "main",
+                            "waveshare_model": "epd7in3e",
+                            "plugin_id": "telegram_frame",
+                            "payload_dir": "data/inkypi",
+                            "update_method": "none",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            os.environ["REMOTE_TELEGRAM_TOKEN"] = "remote-token"
+            try:
+                with self.assertRaises(ConfigError):
+                    load_config(config_path)
+            finally:
+                os.environ.pop("REMOTE_TELEGRAM_TOKEN", None)
+
 
 if __name__ == "__main__":
     unittest.main()

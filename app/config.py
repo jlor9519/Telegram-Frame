@@ -174,6 +174,8 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         errors.append("inkypi.update_now_url is required when inkypi.update_method is 'http_update_now'.")
     if update_method == "command" and not refresh_command:
         errors.append("inkypi.refresh_command is required when inkypi.update_method is 'command'.")
+    if update_method == "none" and not dropbox_config.enabled:
+        errors.append("inkypi.update_method 'none' requires dropbox.enabled to be true.")
 
     inkypi_config = InkyPiConfig(
         repo_path=_resolve_path(inkypi_section.get("repo_path", "~/InkyPi")),

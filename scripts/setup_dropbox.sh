@@ -33,6 +33,11 @@ if [[ -n "${current_refresh_token}" ]]; then
 fi
 
 if [[ -z "${current_refresh_token}" ]]; then
+  if ! command -v curl >/dev/null 2>&1; then
+    echo >&2 "curl is required for Dropbox OAuth token exchange. Install it and rerun this script."
+    exit 1
+  fi
+
   echo
   echo "We need to authorize this app with Dropbox to get a refresh token."
   echo "You will need the App secret from your Dropbox app's Settings page."

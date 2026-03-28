@@ -6,9 +6,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 ensure_not_running_as_root
 ensure_runtime_files
 
-if ask_yes_no "Install/update apt packages needed for Python, Pillow, and Git?" "y"; then
+if ask_yes_no "Install/update apt packages needed for Python, Pillow, Git, and Dropbox setup?" "y"; then
   run_privileged apt-get update
-  run_privileged apt-get install -y python3 python3-venv python3-pip git rsync fonts-dejavu-core
+  run_privileged apt-get install -y python3 python3-venv python3-pip git rsync curl fonts-dejavu-core
 fi
 
 ensure_venv
@@ -53,19 +53,14 @@ else
 fi
 if ask_yes_no "Enable Dropbox uploads for this frame?" "${dropbox_default}"; then
   dropbox_enabled="true"
-  dropbox_token="$(get_or_prompt_value "Dropbox access token" "$(get_env_value DROPBOX_ACCESS_TOKEN)" "" 0)"
 else
   dropbox_enabled="false"
-  dropbox_token="$(get_env_value DROPBOX_ACCESS_TOKEN)"
 fi
 
 service_user="${SUDO_USER:-$(id -un)}"
 service_workdir="${PROJECT_ROOT}"
 
 set_env_value TELEGRAM_BOT_TOKEN "${telegram_token}"
-if [[ -n "${dropbox_token}" ]]; then
-  set_env_value DROPBOX_ACCESS_TOKEN "${dropbox_token}"
-fi
 set_yaml_value security.admin_user_ids list-int "${admin_ids}"
 set_yaml_value security.whitelisted_user_ids list-int "${whitelist_ids}"
 set_yaml_value inkypi.repo_path string "${inkypi_repo}"

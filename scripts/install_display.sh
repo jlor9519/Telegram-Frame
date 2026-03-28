@@ -14,9 +14,9 @@ echo "This installs InkyPi, the telegram_frame plugin, and optional Dropbox sync
 echo "No Telegram bot and no database are installed here."
 echo
 
-if ask_yes_no "Install/update apt packages needed for Python, Git, and Pillow?" "y"; then
+if ask_yes_no "Install/update apt packages needed for Python, Git, Pillow, and Dropbox setup?" "y"; then
   run_privileged apt-get update
-  run_privileged apt-get install -y python3 python3-venv python3-pip git rsync fonts-dejavu-core
+  run_privileged apt-get install -y python3 python3-venv python3-pip git rsync curl fonts-dejavu-core
 fi
 
 ensure_venv
@@ -62,10 +62,8 @@ if [[ "${dropbox_enabled_current}" == "true" ]]; then
 else
   dropbox_default="n"
 fi
-if ask_yes_no "Enable Dropbox sync to receive images from a remote server Pi?" "${dropbox_default}"; then
+if ask_yes_no "Enable Dropbox sync to receive images from a remote server Pi? (required for off-network setups)" "${dropbox_default}"; then
   dropbox_enabled="true"
-  dropbox_token="$(get_or_prompt_value "Dropbox access token" "$(get_env_value DROPBOX_ACCESS_TOKEN)" "" 0)"
-  set_env_value DROPBOX_ACCESS_TOKEN "${dropbox_token}"
   set_yaml_value dropbox.enabled bool "true"
   bash "${PROJECT_ROOT}/scripts/setup_dropbox.sh"
 
@@ -122,7 +120,7 @@ PY
   fi
 else
   set_yaml_value dropbox.enabled bool "false"
-  echo "Dropbox sync skipped. Images must be transferred manually or via local network."
+  echo "Dropbox sync skipped. Off-network server Pis will not be able to deliver images to this display Pi."
 fi
 
 # Show the display Pi's IP so the user can configure the server Pi

@@ -8,11 +8,12 @@ Usage:
     python scripts/display_sync.py [--once] [--interval SECONDS]
 
     --once       Run a single sync check and exit (useful for cron or startup scripts)
-    --interval   Override the poll interval from config (default: 3600 seconds)
+    --interval   Override the poll interval from config (default: 60 seconds)
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -48,9 +49,10 @@ except ImportError:
 
 from dotenv import load_dotenv
 
-DEFAULT_POLL_INTERVAL = 3600
+DEFAULT_POLL_INTERVAL = 60
 DEFAULT_UPDATE_NOW_URL = "http://127.0.0.1/update_now"
 DEFAULT_PLUGIN_ID = "telegram_frame"
+APPLIED_REVISION_FILENAME = ".display_sync_applied_revision"
 
 _shutdown = False
 
@@ -125,12 +127,40 @@ def get_local_revision(payload_path: Path) -> str:
         return ""
 
 
+def _applied_revision_path(payload_dir: Path) -> Path:
+    return payload_dir / APPLIED_REVISION_FILENAME
+
+
+def get_applied_revision(payload_dir: Path) -> str:
+    path = _applied_revision_path(payload_dir)
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def set_applied_revision(payload_dir: Path, revision: str) -> None:
+    path = _applied_revision_path(payload_dir)
+    payload_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=payload_dir, delete=False) as tmp:
+        tmp.write(revision.strip() + "\n")
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def resolve_revision(payload: dict, payload_bytes: bytes) -> str:
+    revision = str(payload.get("revision", "")).strip()
+    if revision:
+        return revision
+    return hashlib.sha256(payload_bytes).hexdigest()[:16]
+
+
 def download_and_patch(
     client: dropbox.Dropbox,
     root_path: str,
     payload_dir: Path,
-) -> bool:
-    """Download current.json + current.png from Dropbox, patch local paths. Returns True if new."""
+) -> str | None:
+    """Ensure current.json + current.png are ready locally. Returns the pending revision."""
     remote_json = f"{root_path}/display/current.json".replace("//", "/")
     remote_png = f"{root_path}/display/current.png".replace("//", "/")
 
@@ -142,29 +172,35 @@ def download_and_patch(
         _, response = client.files_download(remote_json)
     except Exception as exc:
         logger.warning("Failed to download %s: %s", remote_json, exc)
-        return False
+        return None
 
     try:
         remote_payload = json.loads(response.content)
     except json.JSONDecodeError as exc:
         logger.warning("Remote payload is not valid JSON: %s", exc)
-        return False
+        return None
 
-    remote_revision = str(remote_payload.get("revision", ""))
+    remote_revision = resolve_revision(remote_payload, response.content)
+    remote_payload["revision"] = remote_revision
+    applied_revision = get_applied_revision(payload_dir)
+
+    if remote_revision == applied_revision:
+        logger.debug("Revision already applied (%s), skipping", remote_revision)
+        return None
+
     local_revision = get_local_revision(local_json)
+    if remote_revision == local_revision and local_png.exists():
+        logger.info("Revision %s already downloaded locally, retrying display trigger", remote_revision)
+        return remote_revision
 
-    if remote_revision and remote_revision == local_revision:
-        logger.debug("Revision unchanged (%s), skipping", remote_revision)
-        return False
-
-    logger.info("New revision detected: %s (was: %s)", remote_revision, local_revision or "(none)")
+    logger.info("New revision detected: %s (last applied: %s)", remote_revision, applied_revision or "(none)")
 
     # Download image
     try:
         _, img_response = client.files_download(remote_png)
     except Exception as exc:
         logger.warning("Failed to download %s: %s", remote_png, exc)
-        return False
+        return None
 
     # Write image atomically
     payload_dir.mkdir(parents=True, exist_ok=True)
@@ -187,7 +223,7 @@ def download_and_patch(
     tmp_path.replace(local_json)
     logger.info("Downloaded and patched %s", local_json.name)
 
-    return True
+    return remote_revision
 
 
 def trigger_update(update_now_url: str, plugin_id: str, payload_path: Path) -> bool:
@@ -226,18 +262,23 @@ def sync_once(config: dict) -> bool:
         client = dropbox.Dropbox(config["dropbox_token"])
     payload_dir = config["payload_dir"]
 
-    new = download_and_patch(client, config["root_path"], payload_dir)
-    if not new:
+    revision = download_and_patch(client, config["root_path"], payload_dir)
+    if not revision:
         logger.info("No new display payload")
         return False
 
     local_json = payload_dir / "current.json"
     ok = trigger_update(config["update_now_url"], config["plugin_id"], local_json)
     if ok:
+        try:
+            set_applied_revision(payload_dir, revision)
+        except OSError as exc:
+            logger.warning("Display updated, but failed to persist applied revision %s: %s", revision, exc)
+            return False
         logger.info("Display updated successfully")
     else:
-        logger.warning("Display update trigger failed — InkyPi may pick it up on next refresh")
-    return True
+        logger.warning("Display update trigger failed — will retry revision %s on the next sync", revision)
+    return ok
 
 
 def run_daemon(config: dict, interval: int) -> None:

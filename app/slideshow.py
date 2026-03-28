@@ -20,6 +20,9 @@ def schedule_slideshow_job(application: Application) -> None:
         logger.warning("JobQueue not available — auto-advance disabled. Install: pip install 'python-telegram-bot[job-queue]'")
         return
     services = application.bot_data["services"]
+    if services.config.uses_remote_display_transport():
+        logger.info("Remote Dropbox mode detected — slideshow auto-advance disabled on the server Pi.")
+        return
     interval = services.display.get_slideshow_interval()
     application.job_queue.run_repeating(
         _advance_slideshow,
@@ -39,6 +42,9 @@ def reschedule_slideshow_job(application: Application, interval_seconds: int | N
         job.schedule_removal()
 
     services = application.bot_data["services"]
+    if services.config.uses_remote_display_transport():
+        logger.info("Remote Dropbox mode detected — slideshow auto-advance remains disabled.")
+        return
     if interval_seconds is None:
         interval_seconds = services.display.get_slideshow_interval()
 

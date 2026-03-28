@@ -27,6 +27,25 @@ def get_display_lock(context: ContextTypes.DEFAULT_TYPE) -> asyncio.Lock:
     return context.application.bot_data["display_lock"]
 
 
+async def sync_display_payload_to_dropbox(services: AppServices) -> tuple[bool, str | None]:
+    if not services.dropbox.enabled:
+        if services.config.uses_remote_display_transport():
+            return False, "Dropbox ist für den Remote-Transport nicht konfiguriert."
+        return True, None
+
+    uploaded = await asyncio.to_thread(
+        services.dropbox.upload_display_payload,
+        services.config.storage.current_payload_path,
+        services.config.storage.current_image_path,
+    )
+    if uploaded:
+        return True, None
+
+    if services.config.uses_remote_display_transport():
+        return False, "Dropbox-Synchronisierung zum Display-Pi fehlgeschlagen."
+    return True, "Dropbox display payload upload failed."
+
+
 @require_whitelist
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
@@ -92,13 +111,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     storage_ok = services.storage.healthcheck()
     payload_ok = services.display.payload_exists()
 
-    inkypi_reachable = await asyncio.to_thread(services.display.ping_inkypi)
-    if inkypi_reachable is None:
-        inkypi_line = "– lokal"
-    elif inkypi_reachable:
-        inkypi_line = "✓ erreichbar"
+    if services.config.uses_remote_display_transport():
+        inkypi_line = "– via Dropbox"
     else:
-        inkypi_line = "✗ nicht erreichbar"
+        inkypi_reachable = await asyncio.to_thread(services.display.ping_inkypi)
+        if inkypi_reachable is None:
+            inkypi_line = "– lokal"
+        elif inkypi_reachable:
+            inkypi_line = "✓ erreichbar"
+        else:
+            inkypi_line = "✗ nicht erreichbar"
 
     dropbox_line: str
     if not services.config.dropbox.enabled:
@@ -166,6 +188,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if user is None or update.effective_message is None:
         return ConversationHandler.END
 
+    pending = context.user_data.get("pending_submission")
+    if isinstance(pending, dict):
+        original_path = pending.get("original_path")
+        if original_path:
+            Path(original_path).unlink(missing_ok=True)
+
     reservation = get_reservation(context)
     if reservation.owner_user_id == user.id:
         reservation.owner_user_id = None
@@ -185,13 +213,23 @@ async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     async with lock:
         services = get_services(context)
         result = await asyncio.to_thread(services.display.refresh_only)
+        success_text = "Aktualisierung ausgelöst."
+        if result.success:
+            payload_ok, payload_message = await sync_display_payload_to_dropbox(services)
+            if not payload_ok:
+                result = DisplayResult(False, payload_message or "Dropbox-Synchronisierung fehlgeschlagen.")
+            else:
+                if services.config.uses_remote_display_transport():
+                    success_text = "Aktualisierung an den Display-Pi via Dropbox übertragen."
         await update.effective_message.reply_text(
-            "Aktualisierung ausgelöst." if result.success else _friendly_display_error(result.message)
+            success_text if result.success else _friendly_display_error(result.message)
         )
 
 
 def _friendly_display_error(message: str) -> str:
     lower = message.lower()
+    if "dropbox" in lower:
+        return "Display-Synchronisierung via Dropbox fehlgeschlagen. Bitte prüfe Dropbox auf beiden Pis."
     if any(p in lower for p in (
         "request failed", "timed out", "connection refused",
         "no route to host", "network is unreachable",
@@ -242,31 +280,9 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("Kein aktuelles Bild erkannt.")
         return
 
-    interval = await asyncio.to_thread(services.display.get_slideshow_interval)
-    displayed_at = services.database.get_setting("current_image_displayed_at")
     next_images = services.database.get_next_images(current_image_id, 5)
     total = services.database.count_displayed_images()
     current_pos = services.database.get_displayed_image_position(current_image_id)
-
-    # Time remaining for current image
-    from datetime import datetime, timezone as tz
-    from app.slideshow import _is_in_sleep_window, _seconds_until_wake_up
-    now = datetime.now(tz.utc)
-    elapsed = 0
-    if displayed_at:
-        try:
-            since = datetime.fromisoformat(displayed_at)
-            if since.tzinfo is None:
-                since = since.replace(tzinfo=tz.utc)
-            elapsed = max(0, int((now - since).total_seconds()))
-        except (ValueError, TypeError):
-            elapsed = 0
-    remaining = max(0, interval - elapsed)
-
-    sleep_schedule = await asyncio.to_thread(services.display.get_sleep_schedule)
-    in_sleep = bool(sleep_schedule and _is_in_sleep_window(sleep_schedule))
-    if in_sleep:
-        remaining = _seconds_until_wake_up(sleep_schedule)
 
     def _image_label(record: ImageRecord) -> str:
         parts = []
@@ -282,21 +298,47 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     current_record = services.database.get_image_by_id(current_image_id)
     current_label = _image_label(current_record) if current_record else "(unbekannt)"
-    remaining_str = _format_interval(remaining) if remaining > 0 else "weniger als 1 Minute"
-    #lines.append("Aktuell angezeigt:")
-    #lines.append(f"▶ [{current_pos}/{total}] {current_label}")
     lines.append(f"{current_label}")
-    lines.append(f"  Wechsel in ca. {remaining_str}")
+
+    if services.config.uses_remote_display_transport():
+        lines.append("  Zeitplan auf dem Server Pi nicht verfügbar (Remote-Display via Dropbox).")
+    else:
+        interval = await asyncio.to_thread(services.display.get_slideshow_interval)
+        displayed_at = services.database.get_setting("current_image_displayed_at")
+
+        # Time remaining for current image
+        from datetime import datetime, timezone as tz
+        from app.slideshow import _is_in_sleep_window, _seconds_until_wake_up
+        now = datetime.now(tz.utc)
+        elapsed = 0
+        if displayed_at:
+            try:
+                since = datetime.fromisoformat(displayed_at)
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=tz.utc)
+                elapsed = max(0, int((now - since).total_seconds()))
+            except (ValueError, TypeError):
+                elapsed = 0
+        remaining = max(0, interval - elapsed)
+
+        sleep_schedule = await asyncio.to_thread(services.display.get_sleep_schedule)
+        in_sleep = bool(sleep_schedule and _is_in_sleep_window(sleep_schedule))
+        if in_sleep:
+            remaining = _seconds_until_wake_up(sleep_schedule)
+
+        remaining_str = _format_interval(remaining) if remaining > 0 else "weniger als 1 Minute"
+        lines.append(f"  Wechsel in ca. {remaining_str}")
 
     if next_images:
         lines.append("")
         lines.append("Nächste Bilder:")
         for i, record in enumerate(next_images, 1):
-            offset = remaining + (i - 1) * interval
             pos = ((current_pos or 0) + i - 1) % total + 1
-            eta_str = _format_interval(offset) if offset > 0 else "weniger als 1 Minute"
             lines.append(f"{i}. [{pos}/{total}] {_image_label(record)}")
-            lines.append(f"   In ca. {eta_str}")
+            if not services.config.uses_remote_display_transport():
+                offset = remaining + (i - 1) * interval
+                eta_str = _format_interval(offset) if offset > 0 else "weniger als 1 Minute"
+                lines.append(f"   In ca. {eta_str}")
 
     await message.reply_text("\n".join(lines))
 
@@ -346,13 +388,14 @@ async def _display_target(services: AppServices, target: ImageRecord) -> Display
     )
 
     result = await asyncio.to_thread(services.display.display, display_request)
+    if not result.success:
+        return result
 
-    if services.dropbox.enabled:
-        await asyncio.to_thread(
-            services.dropbox.upload_display_payload,
-            services.config.storage.current_payload_path,
-            services.config.storage.current_image_path,
-        )
+    payload_ok, payload_message = await sync_display_payload_to_dropbox(services)
+    if not payload_ok:
+        return DisplayResult(False, payload_message or "Dropbox-Synchronisierung fehlgeschlagen.")
+    if payload_message:
+        logger.warning(payload_message)
 
     return result
 

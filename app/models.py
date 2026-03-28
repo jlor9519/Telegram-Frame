@@ -94,6 +94,9 @@ class AppConfig:
     display: DisplayConfig
     inkypi: InkyPiConfig
 
+    def uses_remote_display_transport(self) -> bool:
+        return self.inkypi.update_method == "none"
+
 
 @dataclass(slots=True)
 class ImageRecord:

@@ -14,9 +14,9 @@ echo "This installs the Telegram bot, database, and Dropbox integration."
 echo "InkyPi and the e-ink display must be running on a separate display Pi."
 echo
 
-if ask_yes_no "Install/update apt packages needed for Python and Git?" "y"; then
+if ask_yes_no "Install/update apt packages needed for Python, Git, and Dropbox setup?" "y"; then
   run_privileged apt-get update
-  run_privileged apt-get install -y python3 python3-venv python3-pip git fonts-dejavu-core
+  run_privileged apt-get install -y python3 python3-venv python3-pip git curl fonts-dejavu-core
 fi
 
 ensure_venv
@@ -59,10 +59,19 @@ if [[ "${dropbox_enabled_current}" == "true" ]]; then
 else
   dropbox_default="n"
 fi
+if [[ "${update_method}" == "none" ]]; then
+  dropbox_default="y"
+fi
 if ask_yes_no "Enable Dropbox uploads for this frame?" "${dropbox_default}"; then
   dropbox_enabled="true"
 else
   dropbox_enabled="false"
+fi
+
+if [[ "${update_method}" == "none" && "${dropbox_enabled}" != "true" ]]; then
+  echo >&2 "Dropbox is required when the display Pi is not on the same network."
+  echo >&2 "Rerun install_server.sh and enable Dropbox for the remote two-Pi setup."
+  exit 1
 fi
 
 service_user="${SUDO_USER:-$(id -un)}"

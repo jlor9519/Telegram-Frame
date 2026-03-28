@@ -43,6 +43,19 @@ class SettingsConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("5. Ausrichtung", reply)
         self.assertIn("6. Bildanpassung", reply)
 
+    async def test_settings_entry_is_unavailable_in_remote_dropbox_mode(self) -> None:
+        services = _FakeServices(is_admin=True, remote_mode=True)
+        update = _FakeUpdate("/settings", user_id=11)
+        context = _FakeContext(services)
+
+        result = await settings_entry(update, context)
+
+        self.assertEqual(result, ConversationHandler.END)
+        self.assertEqual(
+            update.effective_message.replies,
+            ["Anzeigeeinstellungen sind auf dem Server Pi im Dropbox-Modus nicht verfügbar."],
+        )
+
     async def test_receive_settings_value_applies_and_confirms_value(self) -> None:
         services = _FakeServices(is_admin=True)
         services.display.apply_result = DeviceSettingsApplyResult(
@@ -185,10 +198,19 @@ class _FakeDatabase:
 
 
 class _FakeServices:
-    def __init__(self, *, is_admin: bool):
+    def __init__(self, *, is_admin: bool, remote_mode: bool = False):
         self.auth = _FakeAuth(is_admin=is_admin)
         self.display = _FakeDisplay()
         self.database = _FakeDatabase()
+        self.config = _FakeConfig(remote_mode=remote_mode)
+
+
+class _FakeConfig:
+    def __init__(self, *, remote_mode: bool) -> None:
+        self.inkypi = SimpleNamespace(update_method="none" if remote_mode else "http_update_now")
+
+    def uses_remote_display_transport(self) -> bool:
+        return self.inkypi.update_method == "none"
 
 
 class _FakeMessage:

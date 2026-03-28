@@ -74,7 +74,8 @@ For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set 
    ```
    When prompted, enter your Telegram bot token and admin user ID.
    If the display Pi is on a different network (e.g. a gift), answer "no" when asked if the
-   display Pi is on the same network — images will be delivered via Dropbox sync instead.
+   display Pi is on the same network. Dropbox is required in that mode, and images will be
+   delivered via Dropbox sync instead.
 
 ### Updating
 

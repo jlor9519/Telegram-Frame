@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 
 from app.auth import require_whitelist
-from app.commands import get_reservation, get_services
+from app.commands import get_reservation, get_services, sync_display_payload_to_dropbox
 from app.database import utcnow_iso
 from app.models import DisplayError, DisplayRequest, ImageRecord, RenderError
 
@@ -31,6 +31,20 @@ from app.models import DisplayError, DisplayRequest, ImageRecord, RenderError
     WAITING_FOR_PREVIEW_CONFIRM,
 ) = range(5)
 PENDING_SUBMISSION_KEY = "pending_submission"
+
+
+def _discard_pending_submission(context: ContextTypes.DEFAULT_TYPE, *, user_id: int | None = None) -> None:
+    pending = context.user_data.get(PENDING_SUBMISSION_KEY)
+    if isinstance(pending, dict):
+        original_path = pending.get("original_path")
+        if original_path:
+            Path(original_path).unlink(missing_ok=True)
+
+    reservation = get_reservation(context)
+    if user_id is None or reservation.owner_user_id == user_id:
+        reservation.owner_user_id = None
+        reservation.image_id = None
+    context.user_data.pop(PENDING_SUBMISSION_KEY, None)
 
 
 def _location_keyboard() -> InlineKeyboardMarkup:
@@ -304,11 +318,7 @@ async def photo_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception:
                 pass
         user = update.effective_user
-        reservation = get_reservation(context)
-        if user and reservation.owner_user_id == user.id:
-            reservation.owner_user_id = None
-            reservation.image_id = None
-        context.user_data.pop(PENDING_SUBMISSION_KEY, None)
+        _discard_pending_submission(context, user_id=user.id if user else None)
         return ConversationHandler.END
 
     return ConversationHandler.END
@@ -423,22 +433,20 @@ async def _process_image(
     logger.info("Sending image %s to display", record.image_id)
     display_result = await asyncio.to_thread(services.display.display, display_request)
 
-    # Upload display payload to Dropbox for remote display sync
-    if services.dropbox.enabled:
-        try:
-            await asyncio.to_thread(
-                services.dropbox.upload_display_payload,
-                services.config.storage.current_payload_path,
-                services.config.storage.current_image_path,
-            )
-        except Exception as exc:  # pragma: no cover
-            warnings.append(f"Dropbox display payload upload failed: {exc}")
-
     if not display_result.success:
         logger.warning("Display failed for image %s: %s", record.image_id, display_result.message)
         record.status = "display_failed"
         record.last_error = display_result.message
         return record, warnings
+
+    payload_ok, payload_message = await sync_display_payload_to_dropbox(services)
+    if not payload_ok:
+        record.status = "display_failed"
+        record.last_error = payload_message or "Dropbox-Synchronisierung fehlgeschlagen."
+        return record, warnings
+    if payload_message:
+        warnings.append(payload_message)
+
     services.database.set_setting("current_image_displayed_at", utcnow_iso())
 
     if services.dropbox.enabled and services.config.dropbox.upload_rendered:
@@ -450,8 +458,6 @@ async def _process_image(
         except Exception as exc:  # pragma: no cover - network/runtime dependent
             warnings.append(f"Dropbox rendered upload failed: {exc}")
 
-    record.status = "displayed_with_warnings" if warnings else "displayed"
-    record.last_error = " | ".join(warnings) if warnings else None
     services.storage.cleanup_rendered_cache()
 
     # Back up the database after every successful display
@@ -474,6 +480,8 @@ async def _process_image(
         except Exception as exc:  # pragma: no cover
             logger.warning("Local pruning failed: %s", exc)
 
+    record.status = "displayed_with_warnings" if warnings else "displayed"
+    record.last_error = " | ".join(warnings) if warnings else None
     return record, warnings
 
 
@@ -508,12 +516,7 @@ _unexpected_preview = _make_unexpected_handler(WAITING_FOR_PREVIEW_CONFIRM)
 
 async def _conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user if update else None
-    reservation = get_reservation(context)
-    if user and reservation.owner_user_id == user.id:
-        reservation.owner_user_id = None
-        reservation.image_id = None
-    if context.user_data:
-        context.user_data.pop(PENDING_SUBMISSION_KEY, None)
+    _discard_pending_submission(context, user_id=user.id if user else None)
     if update and update.effective_message:
         await update.effective_message.reply_text(
             "Dein Upload ist nach 5 Minuten Inaktivität abgelaufen. "

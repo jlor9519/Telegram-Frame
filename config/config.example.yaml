@@ -53,4 +53,4 @@ inkypi:
 
 # Display sync (display Pi only) — polls Dropbox for new images from server Pi
 display_sync:
-  poll_interval: 3600
+  poll_interval: 60

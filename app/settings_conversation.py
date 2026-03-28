@@ -164,6 +164,11 @@ async def settings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     services = get_services(context)
     if update.effective_message is None:
         return ConversationHandler.END
+    if services.config.uses_remote_display_transport():
+        await update.effective_message.reply_text(
+            "Anzeigeeinstellungen sind auf dem Server Pi im Dropbox-Modus nicht verfügbar."
+        )
+        return ConversationHandler.END
     try:
         device_settings = services.display.read_device_settings()
     except Exception as exc:
