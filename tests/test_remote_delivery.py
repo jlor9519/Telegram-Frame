@@ -98,9 +98,13 @@ class _FakeDropbox:
     def __init__(self, *, upload_ok: bool) -> None:
         self.enabled = True
         self._upload_ok = upload_ok
+        self.last_error = "Dropbox upload failed during test." if not upload_ok else None
 
     def upload_display_payload(self, payload_path: Path, image_path: Path) -> bool:
         return self._upload_ok
+
+    def health_summary(self) -> str:
+        return "connected" if self._upload_ok else "auth_failed"
 
 
 class _FakeDatabase:

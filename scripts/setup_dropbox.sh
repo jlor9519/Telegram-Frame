@@ -18,6 +18,11 @@ current_app_key="$(get_yaml_value dropbox.app_key string)"
 app_key="$(get_or_prompt_value "Dropbox App key" "${current_app_key}" "" 0)"
 set_yaml_value dropbox.app_key string "${app_key}"
 
+# --- App secret (stored in .env) ---
+current_app_secret="$(get_env_value DROPBOX_APP_SECRET)"
+app_secret="$(get_or_prompt_value "Dropbox App secret" "${current_app_secret}" "" 0)"
+set_env_value DROPBOX_APP_SECRET "${app_secret}"
+
 # --- Refresh token (stored in .env) ---
 current_refresh_token="$(get_env_value DROPBOX_REFRESH_TOKEN)"
 if [[ -n "${current_refresh_token}" ]]; then
@@ -40,9 +45,6 @@ if [[ -z "${current_refresh_token}" ]]; then
 
   echo
   echo "We need to authorize this app with Dropbox to get a refresh token."
-  echo "You will need the App secret from your Dropbox app's Settings page."
-  echo
-  read -r -s -p "Dropbox App secret (hidden): " app_secret
   echo
 
   auth_url="https://www.dropbox.com/oauth2/authorize?client_id=${app_key}&response_type=code&token_access_type=offline"
@@ -87,5 +89,9 @@ config = load_config()
 service = DropboxService(config.dropbox)
 if not service.enabled:
     raise SystemExit("Dropbox is enabled in config, but the SDK client could not be created.")
-print("Dropbox client configured successfully.")
+if not service.check_connection():
+    raise SystemExit(service.last_error or "Dropbox authentication failed.")
+if not service.ensure_required_folders():
+    raise SystemExit(service.last_error or "Dropbox folder bootstrap failed.")
+print(f"Dropbox client configured successfully. Remote folders ready under {config.dropbox.root_path}.")
 PY

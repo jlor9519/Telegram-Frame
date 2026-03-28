@@ -72,10 +72,65 @@ For a two-Pi deployment (Telegram bot on one Pi, e-ink display on another), set 
    git clone https://github.com/jlor9519/Telegram-Frame.git ~/EInkProject && cd ~/EInkProject
    bash scripts/install_server.sh
    ```
-   When prompted, enter your Telegram bot token and admin user ID.
-   If the display Pi is on a different network (e.g. a gift), answer "no" when asked if the
-   display Pi is on the same network. Dropbox is required in that mode, and images will be
-   delivered via Dropbox sync instead.
+   Run the installer as your normal user, not with `sudo`. The script uses `sudo` internally
+   for apt and systemd when needed.
+2. Have these ready before you start:
+   - Telegram bot token
+   - your Telegram user ID
+   - Dropbox App key
+   - Dropbox App secret
+   - a browser session for Dropbox authorization
+   - the authorization code returned by Dropbox after approval
+3. If you only care about getting the Telegram bot and Dropbox sync working first:
+   - answer `"no"` when asked whether the display Pi is on the same local network
+   - answer `"yes"` when asked to enable Dropbox
+   - do not enter a display Pi URL; that mode does not need one
+4. In this off-network mode, the bot writes local state under `data/` and uploads the sync
+   payload to Dropbox under `/photo-frame` by default. The installer stores the Dropbox App
+   secret in `.env` as `DROPBOX_APP_SECRET` and creates the required Dropbox folders
+   automatically.
+5. `/settings` is intentionally unavailable on the server Pi in Dropbox mode. Photo uploads,
+   database backups, and display payload sync still work.
+
+### Server Pi checklist
+
+When you are setting up the server Pi for `Telegram bot + SQLite + Dropbox uploader`, keep
+these points in mind:
+
+- Make sure the Pi has outbound internet access and a correct system clock. Telegram polling
+  and Dropbox OAuth both depend on that.
+- Install the repo in the directory where you want to keep it. The generated systemd unit
+  points at the current checkout path, so if you move the repo later, rerun the installer.
+- If you answer `"no"` to the same-network question, Dropbox is mandatory. The installer will
+  refuse a remote setup without Dropbox enabled.
+- You do not need SPI, InkyPi, or the display installer on the server Pi.
+- Local state is stored under `data/`, including the SQLite database at
+  `data/db/photo_frame.db`. Make sure the repo directory has enough free space and remains
+  writable by the user running the bot.
+- By default the Dropbox root path is `/photo-frame`. Change `dropbox.root_path` in
+  `config/config.yaml` if you want a different folder.
+- If you already set up Dropbox before this fix, rerun `bash scripts/setup_dropbox.sh` once so
+  the missing `DROPBOX_APP_SECRET` is saved into `.env`.
+
+### Validate the server Pi install
+
+After the installer finishes:
+
+1. Check the service:
+   ```bash
+   systemctl status photo-frame.service
+   ```
+2. In Telegram, run `/myid` and `/status`, then send one test photo.
+3. Confirm your Telegram user ID is both an admin and whitelisted. If those values were entered
+   incorrectly, the bot may start but reject your uploads.
+4. Confirm Dropbox now contains:
+   - `/photo-frame/images/originals/...`
+   - `/photo-frame/display/current.json`
+   - `/photo-frame/display/current.png`
+   - `/photo-frame/backup/photo_frame.db`
+   - `/photo-frame/images/rendered/...` if `dropbox.upload_rendered` is still enabled
+5. If you later switch to a same-network display Pi, rerun `bash scripts/install_server.sh`
+   and answer `"yes"` to the same-network question.
 
 ### Updating
 

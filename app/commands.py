@@ -41,9 +41,10 @@ async def sync_display_payload_to_dropbox(services: AppServices) -> tuple[bool, 
     if uploaded:
         return True, None
 
+    detail = services.dropbox.last_error or "unbekannter Dropbox-Fehler"
     if services.config.uses_remote_display_transport():
-        return False, "Dropbox-Synchronisierung zum Display-Pi fehlgeschlagen."
-    return True, "Dropbox display payload upload failed."
+        return False, f"Dropbox-Synchronisierung zum Display-Pi fehlgeschlagen: {detail}"
+    return True, f"Dropbox-Warnung: {detail}"
 
 
 @require_whitelist
@@ -122,14 +123,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             inkypi_line = "✗ nicht erreichbar"
 
-    dropbox_line: str
-    if not services.config.dropbox.enabled:
+    dropbox_status = await asyncio.to_thread(services.dropbox.health_summary)
+    if dropbox_status == "disabled":
         dropbox_line = "✗ deaktiviert"
-    elif not services.dropbox.enabled:
+    elif dropbox_status == "not_configured":
         dropbox_line = "✗ nicht konfiguriert"
+    elif dropbox_status == "connected":
+        dropbox_line = "✓ verbunden"
     else:
-        dropbox_ok = await asyncio.to_thread(services.dropbox.check_connection)
-        dropbox_line = "✓ verbunden" if dropbox_ok else "✗ nicht erreichbar"
+        dropbox_line = "✗ Auth fehlgeschlagen"
 
     image_count = services.database.count_displayed_images()
     displayed_at = services.database.get_setting("current_image_displayed_at")
@@ -229,7 +231,7 @@ async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def _friendly_display_error(message: str) -> str:
     lower = message.lower()
     if "dropbox" in lower:
-        return "Display-Synchronisierung via Dropbox fehlgeschlagen. Bitte prüfe Dropbox auf beiden Pis."
+        return message
     if any(p in lower for p in (
         "request failed", "timed out", "connection refused",
         "no route to host", "network is unreachable",

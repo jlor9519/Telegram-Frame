@@ -48,6 +48,7 @@ storage:
 dropbox:
   enabled: false
   access_token_env: DROPBOX_ACCESS_TOKEN
+  app_secret_env: DROPBOX_APP_SECRET
   root_path: /photo-frame
   upload_rendered: false
 

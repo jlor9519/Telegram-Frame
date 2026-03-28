@@ -143,6 +143,149 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(config_path)
 
+    def test_load_config_reads_dropbox_app_secret_from_env(self) -> None:
+        if find_spec("yaml") is None or find_spec("dotenv") is None:
+            self.skipTest("PyYAML and python-dotenv are required for config tests.")
+
+        import yaml
+
+        from app.config import load_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "telegram": {"bot_token_env": "TEST_TELEGRAM_TOKEN"},
+                        "security": {},
+                        "database": {"path": "data/db/test.db"},
+                        "storage": {
+                            "incoming_dir": "data/incoming",
+                            "rendered_dir": "data/rendered",
+                            "cache_dir": "data/cache",
+                            "archive_dir": "data/archive",
+                            "inkypi_payload_dir": "data/inkypi",
+                            "current_payload_path": "data/inkypi/current.json",
+                            "current_image_path": "data/inkypi/current.png",
+                            "keep_recent_rendered": 3,
+                        },
+                        "dropbox": {
+                            "enabled": True,
+                            "app_key": "app-key-123",
+                            "refresh_token_env": "TEST_DROPBOX_REFRESH_TOKEN",
+                            "app_secret_env": "TEST_DROPBOX_APP_SECRET",
+                        },
+                        "display": {
+                            "width": 800,
+                            "height": 480,
+                            "caption_height": 120,
+                            "margin": 12,
+                            "metadata_font_size": 20,
+                            "caption_font_size": 26,
+                            "max_caption_lines": 2,
+                            "font_path": "/tmp/does-not-exist.ttf",
+                            "background_color": "#FFFFFF",
+                            "text_color": "#000000",
+                            "divider_color": "#333333",
+                        },
+                        "inkypi": {
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
+                            "validated_commit": "main",
+                            "waveshare_model": "epd7in3e",
+                            "plugin_id": "telegram_frame",
+                            "payload_dir": "data/inkypi",
+                            "refresh_command": "echo refresh",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            os.environ["TEST_TELEGRAM_TOKEN"] = "telegram-token"
+            os.environ["TEST_DROPBOX_REFRESH_TOKEN"] = "refresh-token"
+            os.environ["TEST_DROPBOX_APP_SECRET"] = "app-secret"
+            try:
+                config = load_config(config_path)
+            finally:
+                os.environ.pop("TEST_TELEGRAM_TOKEN", None)
+                os.environ.pop("TEST_DROPBOX_REFRESH_TOKEN", None)
+                os.environ.pop("TEST_DROPBOX_APP_SECRET", None)
+
+            self.assertEqual(config.dropbox.app_key, "app-key-123")
+            self.assertEqual(config.dropbox.refresh_token, "refresh-token")
+            self.assertEqual(config.dropbox.app_secret, "app-secret")
+
+    def test_load_config_rejects_refresh_token_setup_without_app_secret(self) -> None:
+        if find_spec("yaml") is None or find_spec("dotenv") is None:
+            self.skipTest("PyYAML and python-dotenv are required for config tests.")
+
+        import yaml
+
+        from app.config import ConfigError, load_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "telegram": {"bot_token_env": "TEST_TELEGRAM_TOKEN"},
+                        "security": {},
+                        "database": {"path": "data/db/test.db"},
+                        "storage": {
+                            "incoming_dir": "data/incoming",
+                            "rendered_dir": "data/rendered",
+                            "cache_dir": "data/cache",
+                            "archive_dir": "data/archive",
+                            "inkypi_payload_dir": "data/inkypi",
+                            "current_payload_path": "data/inkypi/current.json",
+                            "current_image_path": "data/inkypi/current.png",
+                            "keep_recent_rendered": 3,
+                        },
+                        "dropbox": {
+                            "enabled": True,
+                            "app_key": "app-key-123",
+                            "refresh_token_env": "TEST_DROPBOX_REFRESH_TOKEN",
+                            "app_secret_env": "TEST_DROPBOX_APP_SECRET",
+                        },
+                        "display": {
+                            "width": 800,
+                            "height": 480,
+                            "caption_height": 120,
+                            "margin": 12,
+                            "metadata_font_size": 20,
+                            "caption_font_size": 26,
+                            "max_caption_lines": 2,
+                            "font_path": "/tmp/does-not-exist.ttf",
+                            "background_color": "#FFFFFF",
+                            "text_color": "#000000",
+                            "divider_color": "#333333",
+                        },
+                        "inkypi": {
+                            "repo_path": "~/InkyPi",
+                            "install_path": "/usr/local/inkypi",
+                            "validated_commit": "main",
+                            "waveshare_model": "epd7in3e",
+                            "plugin_id": "telegram_frame",
+                            "payload_dir": "data/inkypi",
+                            "update_method": "none",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            os.environ["TEST_TELEGRAM_TOKEN"] = "telegram-token"
+            os.environ["TEST_DROPBOX_REFRESH_TOKEN"] = "refresh-token"
+            try:
+                with self.assertRaises(ConfigError) as ctx:
+                    load_config(config_path)
+            finally:
+                os.environ.pop("TEST_TELEGRAM_TOKEN", None)
+                os.environ.pop("TEST_DROPBOX_REFRESH_TOKEN", None)
+
+            self.assertIn("TEST_DROPBOX_APP_SECRET", str(ctx.exception))
+
     def test_load_config_uses_env_override_paths(self) -> None:
         if find_spec("yaml") is None or find_spec("dotenv") is None:
             self.skipTest("PyYAML and python-dotenv are required for config tests.")

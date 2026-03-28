@@ -38,6 +38,16 @@ def main() -> None:
     database.seed_admins(config.security.admin_user_ids)
     database.seed_whitelist(config.security.whitelisted_user_ids)
 
+    dropbox_service = DropboxService(config.dropbox)
+    if dropbox_service.enabled:
+        if dropbox_service.check_connection():
+            if dropbox_service.ensure_required_folders():
+                logger.info("Dropbox remote folders ready under %s", config.dropbox.root_path)
+            else:
+                logger.warning("Dropbox connected, but remote folder bootstrap failed: %s", dropbox_service.last_error)
+        else:
+            logger.warning("Dropbox health check failed during startup: %s", dropbox_service.last_error)
+
     services = AppServices(
         config=config,
         database=database,
@@ -45,7 +55,7 @@ def main() -> None:
         storage=storage,
         renderer=RenderService(config.display),
         display=InkyPiAdapter(config.inkypi, config.storage, config.display),
-        dropbox=DropboxService(config.dropbox),
+        dropbox=dropbox_service,
     )
 
     logger.info("Starting Telegram photo frame bot")

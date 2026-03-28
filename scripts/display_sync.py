@@ -84,11 +84,18 @@ def load_sync_config(config_path: Path) -> dict:
     token = os.getenv(token_env, "").strip() or None
     refresh_token_env = str(dropbox_section.get("refresh_token_env", "DROPBOX_REFRESH_TOKEN"))
     refresh_token = os.getenv(refresh_token_env, "").strip() or None
+    app_secret_env = str(dropbox_section.get("app_secret_env", "DROPBOX_APP_SECRET"))
+    app_secret = os.getenv(app_secret_env, "").strip() or None
     app_key = str(dropbox_section.get("app_key", "")).strip() or None
 
-    has_refresh = refresh_token and app_key
+    has_refresh = refresh_token and app_key and app_secret
     if not has_refresh and not token:
-        logger.error("No Dropbox credentials found. Set %s + dropbox.app_key, or %s", refresh_token_env, token_env)
+        logger.error(
+            "No Dropbox credentials found. Set %s + dropbox.app_key + %s, or %s",
+            refresh_token_env,
+            app_secret_env,
+            token_env,
+        )
         sys.exit(1)
 
     root_path = str(dropbox_section.get("root_path", "/photo-frame")).rstrip("/") or "/photo-frame"
@@ -110,6 +117,7 @@ def load_sync_config(config_path: Path) -> dict:
         "dropbox_token": token,
         "dropbox_refresh_token": refresh_token,
         "dropbox_app_key": app_key,
+        "dropbox_app_secret": app_secret,
         "root_path": root_path,
         "payload_dir": payload_path,
         "update_now_url": update_now_url,
@@ -257,6 +265,7 @@ def sync_once(config: dict) -> bool:
         client = dropbox.Dropbox(
             oauth2_refresh_token=config["dropbox_refresh_token"],
             app_key=config["dropbox_app_key"],
+            app_secret=config["dropbox_app_secret"],
         )
     else:
         client = dropbox.Dropbox(config["dropbox_token"])

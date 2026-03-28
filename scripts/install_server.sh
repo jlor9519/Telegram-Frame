@@ -12,6 +12,8 @@ ensure_runtime_files
 echo "=== Server Pi installer ==="
 echo "This installs the Telegram bot, database, and Dropbox integration."
 echo "InkyPi and the e-ink display must be running on a separate display Pi."
+echo "If you only want Telegram + Dropbox right now, answer 'no' to the same-network question."
+echo "That mode does not require a display Pi URL."
 echo
 
 if ask_yes_no "Install/update apt packages needed for Python, Git, and Dropbox setup?" "y"; then
@@ -100,6 +102,11 @@ if [[ "${update_method}" == "http_update_now" ]]; then
   echo "The Telegram bot is running and will send images to ${display_pi_url}."
 else
   echo "The Telegram bot is running. Images will be delivered via Dropbox sync."
+  echo "Note: /settings is intentionally unavailable on the server Pi in Dropbox mode."
 fi
 echo
-echo "Use /status in Telegram to check the bot status."
+echo "Next checks:"
+echo "  - systemctl status photo-frame.service"
+echo "  - /myid and /status in Telegram"
+echo "  - send one test photo"
+echo "  - confirm Dropbox files under /photo-frame/images/originals, /photo-frame/display, and /photo-frame/backup"

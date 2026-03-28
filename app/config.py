@@ -97,22 +97,41 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     dropbox_token = os.getenv(dropbox_env, "").strip() or None
     refresh_token_env = str(dropbox_section.get("refresh_token_env", "DROPBOX_REFRESH_TOKEN"))
     dropbox_refresh_token = os.getenv(refresh_token_env, "").strip() or None
+    app_secret_env = str(dropbox_section.get("app_secret_env", "DROPBOX_APP_SECRET"))
+    dropbox_app_secret = os.getenv(app_secret_env, "").strip() or None
     dropbox_app_key = str(dropbox_section.get("app_key", "")).strip() or None
     dropbox_config = DropboxConfig(
         enabled=bool(dropbox_section.get("enabled", False)),
         access_token=dropbox_token,
         app_key=dropbox_app_key,
+        app_secret=dropbox_app_secret,
         refresh_token=dropbox_refresh_token,
         root_path=str(dropbox_section.get("root_path", "/photo-frame")).rstrip("/") or "/photo-frame",
         upload_rendered=bool(dropbox_section.get("upload_rendered", True)),
     )
     if dropbox_config.enabled:
-        has_refresh = dropbox_config.refresh_token and dropbox_config.app_key
+        has_refresh = (
+            dropbox_config.refresh_token
+            and dropbox_config.app_key
+            and dropbox_config.app_secret
+        )
         has_access = dropbox_config.access_token
-        if not has_refresh and not has_access:
+        has_partial_refresh = any(
+            [
+                dropbox_config.refresh_token,
+                dropbox_config.app_key,
+                dropbox_config.app_secret,
+            ]
+        )
+        if has_partial_refresh and not has_refresh and not has_access:
+            errors.append(
+                f"Dropbox refresh-token setup is incomplete. "
+                f"Set {refresh_token_env} + dropbox.app_key + {app_secret_env}, or {dropbox_env}."
+            )
+        elif not has_refresh and not has_access:
             errors.append(
                 f"Dropbox is enabled but no credentials found. "
-                f"Set {refresh_token_env} + dropbox.app_key, or {dropbox_env}."
+                f"Set {refresh_token_env} + dropbox.app_key + {app_secret_env}, or {dropbox_env}."
             )
 
     display_section = raw.get("display", {})
